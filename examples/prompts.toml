@@ -1,0 +1,16 @@
+# Copy this file to one or both locations:
+#   $(herdr plugin config-dir herdr.prompt-library)/prompts.toml  (global)
+#   .herdr/prompts.toml                                           (project)
+# Project prompts are shown before global prompts. Duplicate names are kept.
+
+[[prompts]]
+name = "Review change"
+description = "Review the current change for correctness and regressions."
+contents = '''Review this change for correctness, regressions, and missing tests.
+
+List findings by severity with file and line references.'''
+
+[[prompts]]
+name = "Explain code"
+description = "Explain the selected code concisely."
+contents = "Explain this code concisely, including its inputs, outputs, and important tradeoffs."

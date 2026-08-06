@@ -1,0 +1,24 @@
+id = "herdr.prompt-library"
+name = "Prompt Library"
+version = "0.1.0"
+description = "Browse and insert prompts from a shared prompt library."
+min_herdr_version = "0.7.5"
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["go", "build", "-o", "bin/herdr-prompt-library", "./cmd/herdr-prompt-library"]
+
+[[actions]]
+id = "open"
+title = "Open Prompt Library"
+description = "Open the prompt library for the previously focused pane."
+command = ["./bin/herdr-prompt-library", "open"]
+contexts = ["pane"]
+
+[[panes]]
+id = "picker"
+title = "Prompt Picker"
+command = ["./bin/herdr-prompt-library", "picker"]
+placement = "popup"
+width = "85%"
+height = "80%"
