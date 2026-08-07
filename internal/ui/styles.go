@@ -23,12 +23,18 @@ var (
 				Foreground(accentColor)
 	itemDescriptionStyle = lipgloss.NewStyle().
 				Foreground(mutedColor)
-	projectBadgeStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("42"))
+	localBadgeStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("42"))
 	globalBadgeStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("39"))
+	scopeStyle = lipgloss.NewStyle().
+			Foreground(mutedColor).
+			Padding(0, 1)
+	activeScopeStyle = scopeStyle.
+				Bold(true).
+				Foreground(accentColor)
 	errorStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("196"))
