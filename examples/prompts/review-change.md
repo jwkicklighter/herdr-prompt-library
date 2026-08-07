@@ -1,6 +1,5 @@
 ---
 title: Review change
-description: Review the current change for correctness and regressions.
 ---
 
 Review this change for correctness, regressions, and missing tests.

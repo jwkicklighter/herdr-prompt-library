@@ -31,7 +31,7 @@ func TestLibrariesCreateBothScopesWithEscapedFrontmatterAndExactBody(t *testing.
 	}
 }
 
-func TestLibrariesRoundTripOptionalDescriptions(t *testing.T) {
+func TestLibrariesUpdatesPreserveLegacyMetadata(t *testing.T) {
 	libraries := testLibraries(t)
 	created, err := libraries.Create(SourceProject, Prompt{Name: "Optional", Contents: "body"})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestLibrariesRoundTripOptionalDescriptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	loaded, err = loadPrompt(updated.Path, SourceProject)
-	if err != nil || loaded.Description != " \t " {
+	if err != nil || loaded.Description != "" {
 		t.Fatalf("updated description = %q, err = %v", loaded.Description, err)
 	}
 
@@ -58,6 +58,17 @@ func TestLibrariesRoundTripOptionalDescriptions(t *testing.T) {
 	loaded, err = loadPrompt(duplicate.Path, SourceGlobal)
 	if err != nil || loaded.Description != "" {
 		t.Fatalf("duplicated description = %q, err = %v", loaded.Description, err)
+	}
+
+	legacyPath := writePromptFile(t, libraries.LocalDir, "legacy.md", promptFile("Legacy", "Keep me", "body"))
+	legacy := Prompt{Name: "Legacy", Description: "Keep me", Contents: "body", Source: SourceProject, Path: legacyPath}
+	updated, err = libraries.Update(legacy, Prompt{Name: "Renamed", Contents: "updated body"})
+	if err != nil || updated.Description != "Keep me" {
+		t.Fatalf("updated legacy description = %q, err = %v", updated.Description, err)
+	}
+	duplicate, err = libraries.Duplicate(updated, SourceGlobal, Prompt{Name: "Legacy copy", Contents: "updated body"})
+	if err != nil || duplicate.Description != "Keep me" {
+		t.Fatalf("duplicate legacy description = %q, err = %v", duplicate.Description, err)
 	}
 }
 
@@ -124,7 +135,7 @@ func TestLibrariesUpdatePreservesCRLFFrontmatterFraming(t *testing.T) {
 	if strings.Contains(strings.ReplaceAll(string(contents), "\r\n", ""), "\n") {
 		t.Errorf("update changed CRLF framing: %q", contents)
 	}
-	want := "---\r\ntitle: Changed\r\ndescription: After\r\ncustom: [one, two]\r\n---\r\nnew body\r\n"
+	want := "---\r\ntitle: Changed\r\ndescription: Before\r\ncustom: [one, two]\r\n---\r\nnew body\r\n"
 	if string(contents) != want {
 		t.Errorf("contents = %q, want %q", contents, want)
 	}

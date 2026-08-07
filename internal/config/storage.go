@@ -77,8 +77,8 @@ func (libraries Libraries) Create(source string, prompt Prompt) (Prompt, error) 
 	return prompt, nil
 }
 
-// Update atomically replaces prompt's title, description, and body without
-// changing its filename. Unrecognized YAML frontmatter fields are retained.
+// Update atomically replaces prompt's title and body without changing its
+// filename. Existing description and unrecognized frontmatter fields remain.
 func (libraries Libraries) Update(prompt, changes Prompt) (Prompt, error) {
 	path, err := libraries.safePromptPath(prompt)
 	if err != nil {
@@ -97,11 +97,12 @@ func (libraries Libraries) Update(prompt, changes Prompt) (Prompt, error) {
 	if err := yaml.Unmarshal(frontmatter, &metadata); err != nil {
 		return Prompt{}, fmt.Errorf("parse prompt frontmatter in %q: %w", path, err)
 	}
-	frontmatter, err = updateMetadata(frontmatter, newline, &metadata, changes.Name, changes.Description)
+	description := metadataValue(&metadata, "description")
+	frontmatter, err = updateMetadata(frontmatter, newline, &metadata, changes.Name)
 	if err != nil {
 		return Prompt{}, fmt.Errorf("update prompt frontmatter in %q: %w", path, err)
 	}
-	updated := Prompt{Name: changes.Name, Description: changes.Description, Contents: changes.Contents, Source: prompt.Source, Path: prompt.Path}
+	updated := Prompt{Name: changes.Name, Description: description, Contents: changes.Contents, Source: prompt.Source, Path: prompt.Path}
 	if err := validate(updated); err != nil {
 		return Prompt{}, err
 	}
@@ -130,7 +131,7 @@ func (libraries Libraries) Delete(prompt Prompt) error {
 }
 
 // Duplicate copies a prompt into destination, preserving unrecognized
-// frontmatter metadata while applying the requested editable fields.
+// frontmatter metadata while applying the requested title and body.
 func (libraries Libraries) Duplicate(prompt Prompt, destination string, changes Prompt) (Prompt, error) {
 	path, err := libraries.safePromptPath(prompt)
 	if err != nil {
@@ -140,7 +141,7 @@ func (libraries Libraries) Duplicate(prompt Prompt, destination string, changes 
 	if err != nil {
 		return Prompt{}, fmt.Errorf("read prompt %q: %w", path, err)
 	}
-	duplicate := Prompt{Name: changes.Name, Description: changes.Description, Contents: changes.Contents, Source: destination}
+	duplicate := Prompt{Name: changes.Name, Description: prompt.Description, Contents: changes.Contents, Source: destination}
 	if err := validate(duplicate); err != nil {
 		return Prompt{}, err
 	}
@@ -312,7 +313,7 @@ func rewritePrompt(contents []byte, changes Prompt, path string) ([]byte, error)
 	if err := yaml.Unmarshal(frontmatter, &metadata); err != nil {
 		return nil, fmt.Errorf("parse prompt frontmatter in %q: %w", path, err)
 	}
-	frontmatter, err = updateMetadata(frontmatter, newline, &metadata, changes.Name, changes.Description)
+	frontmatter, err = updateMetadata(frontmatter, newline, &metadata, changes.Name)
 	if err != nil {
 		return nil, fmt.Errorf("update prompt frontmatter in %q: %w", path, err)
 	}
@@ -324,7 +325,19 @@ func rewritePrompt(contents []byte, changes Prompt, path string) ([]byte, error)
 	return append(updated, changes.Contents...), nil
 }
 
-func updateMetadata(frontmatter, newline []byte, document *yaml.Node, title, description string) ([]byte, error) {
+func metadataValue(document *yaml.Node, name string) string {
+	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return ""
+	}
+	for index := 0; index < len(document.Content[0].Content); index += 2 {
+		if document.Content[0].Content[index].Value == name {
+			return document.Content[0].Content[index+1].Value
+		}
+	}
+	return ""
+}
+
+func updateMetadata(frontmatter, newline []byte, document *yaml.Node, title string) ([]byte, error) {
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
 		return nil, errors.New("frontmatter must be a mapping")
 	}
@@ -346,7 +359,7 @@ func updateMetadata(frontmatter, newline []byte, document *yaml.Node, title, des
 	fields := []struct {
 		key   string
 		value string
-	}{{"title", title}, {"description", description}}
+	}{{"title", title}}
 	var replacements []replacement
 	for index := 0; index < len(mapping.Content); index += 2 {
 		key := mapping.Content[index]

@@ -117,7 +117,7 @@ func TestEscapeAndCtrlCCancelWithoutSelection(t *testing.T) {
 	}
 }
 
-func TestWeightedFuzzySearchRanksFieldsAndShowsBodyExcerpt(t *testing.T) {
+func TestFuzzySearchExcludesDescriptionsAndKeepsBodyExcerpts(t *testing.T) {
 	model := New([]config.Prompt{
 		{Name: "Body match", Description: "Only in contents", Contents: "Run the deploy production checklist carefully", Source: config.SourceProject},
 		{Name: "Description match", Description: "Deploy production safely", Contents: "unrelated", Source: config.SourceGlobal},
@@ -130,33 +130,38 @@ func TestWeightedFuzzySearchRanksFieldsAndShowsBodyExcerpt(t *testing.T) {
 	}
 
 	items := model.list.Items()
-	if len(items) != 3 {
-		t.Fatalf("filtered item count = %d, want 3", len(items))
+	if len(items) != 2 {
+		t.Fatalf("filtered item count = %d, want 2", len(items))
 	}
-	want := []string{"Deploy production", "Description match", "Body match"}
+	want := []string{"Deploy production", "Body match"}
 	for index, name := range want {
 		if got := items[index].(promptItem).prompt.Name; got != name {
 			t.Errorf("result %d = %q, want %q", index, got, name)
 		}
 	}
-	bodyDescription := items[2].(promptItem).description
-	if !strings.Contains(bodyDescription, "deploy production checklist") {
-		t.Errorf("body-only result description = %q, want matching excerpt", bodyDescription)
+	if view := model.View().Content; !strings.Contains(view, "Run the deploy production") {
+		t.Errorf("list does not retain body excerpt: %q", view)
 	}
 }
 
-func TestDescriptionlessPromptRendersAndSearchesByTitleAndBody(t *testing.T) {
-	model := New([]config.Prompt{{Name: "Deploy helper", Contents: "production checklist", Source: config.SourceProject}})
+func TestPromptExcerptHasTwoLinesAndSkipsOpeningBlankSpace(t *testing.T) {
+	model := New([]config.Prompt{{Name: "Deploy helper", Description: "hidden metadata", Contents: "\n \n  production checklist with a verylongunbrokentokenthatneedstruncation", Source: config.SourceProject}})
 	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 20})
-	if view := model.View().Content; !strings.Contains(view, "Deploy helper") {
-		t.Fatalf("descriptionless prompt missing from list: %q", view)
+	item := model.list.Items()[0].(promptItem)
+	lines := promptExcerpt(item.prompt.Contents, 18)
+	if len(lines) != 2 || lines[0] != "production" || lines[1] != "checklist with ..." {
+		t.Fatalf("excerpt = %#v", lines)
+	}
+	view := model.View().Content
+	if strings.Contains(view, "hidden metadata") || !strings.Contains(view, "production checklist") {
+		t.Errorf("row rendered metadata or omitted prompt excerpt: %q", view)
 	}
 	model = update(t, model, key("/"))
-	for _, input := range []string{"p", "r", "o", "d"} {
-		model = update(t, model, key(input))
+	for _, input := range "hidden" {
+		model = update(t, model, key(string(input)))
 	}
-	if len(model.list.Items()) != 1 || !strings.Contains(model.list.Items()[0].(promptItem).description, "production checklist") {
-		t.Errorf("body search did not show a useful excerpt: %#v", model.list.Items())
+	if len(model.list.Items()) != 0 {
+		t.Errorf("description-only search returned %d items", len(model.list.Items()))
 	}
 }
 
@@ -227,9 +232,9 @@ func TestFilteredNavigationPreviewAndInsertionUseExactPrompt(t *testing.T) {
 func TestScopesCycleDirectlyFilterAndRememberSelection(t *testing.T) {
 	model := New([]config.Prompt{
 		{Name: "Local one", Description: "first", Contents: "local one", Source: config.SourceProject},
-		{Name: "Local two", Description: "shared term", Contents: "local two", Source: config.SourceProject},
+		{Name: "Local two", Description: "shared term", Contents: "local shared term two", Source: config.SourceProject},
 		{Name: "Global one", Description: "first", Contents: "global one", Source: config.SourceGlobal},
-		{Name: "Global two", Description: "shared term", Contents: "global two", Source: config.SourceGlobal},
+		{Name: "Global two", Description: "shared term", Contents: "global shared term two", Source: config.SourceGlobal},
 	}, nil)
 	model = update(t, model, key("tab"))
 	if model.scope != localScope || len(model.list.Items()) != 2 {
@@ -346,7 +351,7 @@ func TestViewShowsSourcesAndResponsiveLayout(t *testing.T) {
 	model := newTestModel(t)
 	model = update(t, model, tea.WindowSizeMsg{Width: 120, Height: 25})
 	wide := model.View().Content
-	for _, text := range []string{"shared", "Project duplicate", "LOCAL", "GLOBAL", "Preview", "project contents", "All", "Local", "Global", "Search:"} {
+	for _, text := range []string{"shared", "project contents", "global contents", "Preview", "All", "Local", "Global", "Search:"} {
 		if !strings.Contains(wide, text) {
 			t.Errorf("wide view does not contain %q:\n%s", text, wide)
 		}
@@ -428,8 +433,8 @@ func TestCreatePromptsInBothScopesWithExactBody(t *testing.T) {
 			if model.form == nil || model.form.destination != source {
 				t.Fatalf("create destination = %#v, want %s", model.form, source)
 			}
-			if model.form.description.Placeholder != "Optional description" {
-				t.Errorf("description placeholder = %q", model.form.description.Placeholder)
+			if model.form.title.Placeholder == "" || model.form.body.Placeholder == "" || strings.Contains(strings.ToLower(model.form.title.Placeholder+model.form.body.Placeholder), "required") {
+				t.Errorf("unhelpful placeholders: title=%q body=%q", model.form.title.Placeholder, model.form.body.Placeholder)
 			}
 			body := "  first line\nsecond line  \n"
 			model.form.title.SetValue("New prompt")
@@ -473,7 +478,7 @@ func TestFormBodyAcceptsBracketedPasteInEveryMode(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
 			model = update(t, model, key(test.shortcut))
-			model.focusForm(2)
+			model.focusForm(1)
 			destination := model.form.destination
 
 			model = update(t, model, tea.PasteMsg{Content: pasted})
@@ -492,7 +497,7 @@ func TestFormBodyAcceptsBracketedPasteInEveryMode(t *testing.T) {
 	}
 }
 
-func TestFormTextInputsAcceptBracketedPaste(t *testing.T) {
+func TestFormTitleAcceptsBracketedPaste(t *testing.T) {
 	model := NewWithLibraries(nil, fakeLibraries{})
 	model = update(t, model, key("a"))
 	model = update(t, model, tea.PasteMsg{Content: "ctrl+s"})
@@ -501,15 +506,6 @@ func TestFormTextInputsAcceptBracketedPaste(t *testing.T) {
 		t.Errorf("title after paste and typing = %q, want %q", got, want)
 	}
 
-	model = update(t, model, key("tab"))
-	model = update(t, model, tea.PasteMsg{Content: "esc"})
-	model = update(t, model, key("y"))
-	if model.form == nil {
-		t.Fatal("pasted shortcut-looking description closed the form")
-	}
-	if got, want := model.form.description.Value(), "escy"; got != want {
-		t.Errorf("description after paste and typing = %q, want %q", got, want)
-	}
 }
 
 func TestFormViewRendersLabeledBorderedFieldsWithSpacing(t *testing.T) {
@@ -518,13 +514,13 @@ func TestFormViewRendersLabeledBorderedFieldsWithSpacing(t *testing.T) {
 	model = update(t, model, key("a"))
 	view := ansiEscape.ReplaceAllString(model.View().Content, "")
 
-	for _, label := range []string{"Title", "Description", "Body"} {
+	for _, label := range []string{"Title", "Prompt"} {
 		if !strings.Contains(view, "╭─ "+label+" ") || !strings.Contains(view, "╰") {
 			t.Errorf("form view missing labeled %s border:\n%s", label, view)
 		}
 	}
-	fieldGap := regexp.MustCompile(`╯│\n│ *│\n│╭─ (Description|Body) `)
-	if matches := fieldGap.FindAllString(view, -1); len(matches) != 2 {
+	fieldGap := regexp.MustCompile(`╯│\n│ *│\n│╭─ Prompt `)
+	if matches := fieldGap.FindAllString(view, -1); len(matches) != 1 {
 		t.Errorf("form fields are not vertically separated:\n%s", view)
 	}
 }
@@ -538,25 +534,25 @@ func TestFormViewHighlightsFocusedField(t *testing.T) {
 	}
 	view := model.View().Content
 	titleFocused := focusedFormFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Title ")
-	descriptionInactive := formFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Description ")
-	if !strings.Contains(view, titleFocused) || !strings.Contains(view, descriptionInactive) {
+	promptInactive := formFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Prompt ")
+	if !strings.Contains(view, titleFocused) || !strings.Contains(view, promptInactive) {
 		t.Fatal("initial focus styling was not rendered on title only")
 	}
 	view = ansiEscape.ReplaceAllString(view, "")
-	if !strings.Contains(view, "╭─ Title ") || !strings.Contains(view, "╭─ Description ") {
+	if !strings.Contains(view, "╭─ Title ") || !strings.Contains(view, "╭─ Prompt ") {
 		t.Fatal("form fields were not rendered")
 	}
 
 	model = update(t, model, key("tab"))
 	if model.form.focus != 1 {
-		t.Fatalf("focus after Tab = %d, want description", model.form.focus)
+		t.Fatalf("focus after Tab = %d, want prompt", model.form.focus)
 	}
-	if formField("Description", "", 20, true) == formField("Description", "", 20, false) {
-		t.Fatal("description focus styling was not rendered after Tab")
+	if formField("Prompt", "", 20, true) == formField("Prompt", "", 20, false) {
+		t.Fatal("prompt focus styling was not rendered after Tab")
 	}
-	descriptionFocused := focusedFormFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Description ")
-	if view := model.View().Content; !strings.Contains(view, descriptionFocused) {
-		t.Fatal("description focus styling was not rendered in the view after Tab")
+	promptFocused := focusedFormFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Prompt ")
+	if view := model.View().Content; !strings.Contains(view, promptFocused) {
+		t.Fatal("prompt focus styling was not rendered in the view after Tab")
 	}
 }
 
@@ -575,10 +571,42 @@ func TestFormViewFitsSupportedNarrowAndWideSizes(t *testing.T) {
 			if lines := len(strings.Split(view, "\n")); lines > size.Height {
 				t.Errorf("view height = %d, terminal height = %d", lines, size.Height)
 			}
-			if !strings.Contains(view, "< Local | Global >") {
+			if !strings.Contains(view, "Destination:") || !strings.Contains(view, "Local") || !strings.Contains(view, "Global") {
 				t.Errorf("destination controls missing at %dx%d", size.Width, size.Height)
 			}
 		})
+	}
+}
+
+func TestDestinationControlKeyboardAndEditFormFields(t *testing.T) {
+	prompt := config.Prompt{Name: "Existing", Description: "Keep", Contents: "body", Source: config.SourceProject, Path: "/project/existing.md"}
+	model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
+	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 24})
+	model = update(t, model, key("a"))
+	if model.form.body.ShowLineNumbers {
+		t.Fatal("prompt input displays line numbers")
+	}
+	model = update(t, model, key("tab"))
+	model = update(t, model, key("tab"))
+	if model.form.focus != 2 {
+		t.Fatalf("destination focus = %d", model.form.focus)
+	}
+	model = update(t, model, key("right"))
+	if model.form.destination != config.SourceGlobal {
+		t.Fatalf("right did not select global: %q", model.form.destination)
+	}
+	if view := ansiEscape.ReplaceAllString(model.View().Content, ""); !contains(view, "Destination:", "Local", "Global") {
+		t.Errorf("segmented destination missing: %q", view)
+	}
+	model = update(t, model, key("space"))
+	if model.form.destination != config.SourceProject {
+		t.Fatalf("space did not change destination: %q", model.form.destination)
+	}
+	model = update(t, model, key("esc"))
+	model = update(t, model, key("e"))
+	view := ansiEscape.ReplaceAllString(model.View().Content, "")
+	if strings.Contains(view, "Destination:") || strings.Contains(view, "Description") || !strings.Contains(view, "Prompt") {
+		t.Errorf("edit fields = %q", view)
 	}
 }
 
@@ -591,7 +619,6 @@ func TestCrossScopeCreateRevealsResultAndPreservesMatchingQuery(t *testing.T) {
 	model.refreshItems(config.Prompt{}, false)
 	model = update(t, model, key("a"))
 	model.form.title.SetValue("New global prompt")
-	model.form.description.SetValue("Description")
 	model.form.body.SetValue("new body")
 	model.form.destination = config.SourceGlobal
 	model = update(t, model, key("ctrl+s"))
@@ -620,13 +647,12 @@ func TestCreateValidationAndWriteErrorsPreserveForm(t *testing.T) {
 	model := NewWithLibraries(nil, storage)
 	model = update(t, model, key("a"))
 	model.form.title.SetValue("Keep title")
-	model.form.description.SetValue("Keep description")
 	model.form.body.SetValue("Keep\nbody")
 	model = update(t, model, key("ctrl+s"))
 	if model.form == nil || !errors.Is(model.form.err, wantErr) {
 		t.Fatalf("form error = %#v", model.form)
 	}
-	if model.form.title.Value() != "Keep title" || model.form.description.Value() != "Keep description" || model.form.body.Value() != "Keep\nbody" {
+	if model.form.title.Value() != "Keep title" || model.form.body.Value() != "Keep\nbody" {
 		t.Errorf("form input was not preserved: %#v", model.form)
 	}
 	model = update(t, model, key("esc"))
@@ -676,11 +702,10 @@ func TestEditPreservesPathUnknownMetadataAndRefreshesPreview(t *testing.T) {
 		t.Fatalf("edit form = %#v", model.form)
 	}
 	model.form.title.SetValue("Renamed")
-	model.form.description.SetValue("   ")
 	model.form.body.SetValue(" exact body\n")
 	model = update(t, model, key("ctrl+s"))
 	updated := model.currentPrompt()
-	if updated.Path != path || updated.Name != "Renamed" || updated.Description != "   " || model.preview.GetContent() != " exact body\n" {
+	if updated.Path != path || updated.Name != "Renamed" || updated.Description != "Before" || model.preview.GetContent() != " exact body\n" {
 		t.Errorf("updated = %#v preview=%q", updated, model.preview.GetContent())
 	}
 	raw, err := os.ReadFile(path)
@@ -764,20 +789,19 @@ func TestDuplicatePreservesCustomFrontmatterAndRevealsCrossScopeResult(t *testin
 	model.refreshItems(original, true)
 	model = update(t, model, key("d"))
 	model.form.title.SetValue("Fresh copy")
-	model.form.description.SetValue("")
 	model.form.destination = config.SourceGlobal
 	model = update(t, model, key("ctrl+s"))
 	model = update(t, model, key("enter"))
 
 	duplicate := model.currentPrompt()
-	if model.scope != globalScope || model.query != "" || duplicate.Name != "Fresh copy" || duplicate.Description != "" || duplicate.Source != config.SourceGlobal {
+	if model.scope != globalScope || model.query != "" || duplicate.Name != "Fresh copy" || duplicate.Description != "Before" || duplicate.Source != config.SourceGlobal {
 		t.Fatalf("cross-scope duplicate: scope=%s query=%q selected=%#v", model.scope, model.query, duplicate)
 	}
 	contents, err := os.ReadFile(duplicate.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(string(contents), "title: Fresh copy", "description: \"\"", "custom: keep-me", "old body\n") {
+	if !contains(string(contents), "title: Fresh copy", "description: Before", "custom: keep-me", "old body\n") {
 		t.Errorf("duplicate did not retain custom frontmatter: %q", contents)
 	}
 }
@@ -970,7 +994,7 @@ func TestHotkeyDialogIsResponsiveAccurateAndStatePreserving(t *testing.T) {
 
 			model = update(t, model, key("a"))
 			model.form.title.SetValue("Preserved")
-			model.focusForm(3)
+			model.focusForm(2)
 			model = update(t, model, key("?"))
 			model = update(t, model, key("esc"))
 			if model.helpOpen || model.form == nil || model.form.title.Value() != "Preserved" {
@@ -1086,6 +1110,12 @@ func key(value string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
 		return tea.KeyPressMsg{Code: tea.KeyDown}
+	case "left":
+		return tea.KeyPressMsg{Code: tea.KeyLeft}
+	case "right":
+		return tea.KeyPressMsg{Code: tea.KeyRight}
+	case "space":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
 	case "enter":
 		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":

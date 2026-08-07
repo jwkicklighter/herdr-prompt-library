@@ -67,12 +67,11 @@ Create the global directory when adding the first global prompt:
 mkdir -p "$(herdr plugin config-dir herdr.prompt-library)/prompts"
 ```
 
-Copy and adapt the individual examples in [`examples/prompts/`](examples/prompts/) into either directory. Each file has YAML frontmatter with a required, nonblank `title` and an optional `description`, followed by a required, nonblank literal prompt body. The description may be omitted or blank:
+Copy and adapt the individual examples in [`examples/prompts/`](examples/prompts/) into either directory. Each file has YAML frontmatter with a required, nonblank `title`, followed by a required, nonblank literal prompt body. Existing `description` and other frontmatter fields are preserved but are not shown or searched:
 
 ```markdown
 ---
 title: Explain code
-description: Explain the selected code concisely.
 ---
 
 Explain this code concisely, including its inputs and outputs.
@@ -88,9 +87,9 @@ The picker has three source views:
 - `Local`: prompts below the focused project's `.herdr/prompts/`
 - `Global`: prompts below the plugin config `prompts/`
 
-The picker provides `All`, `Local`, and `Global` views; the default is `All`. Switching views never changes files. Each entry shows its title, optional description, and `LOCAL` or `GLOBAL` source badge. Duplicate titles remain separate entries.
+The picker provides `All`, `Local`, and `Global` views; the default is `All`. Switching views never changes files. Each entry shows its title, two wrapped lines from the beginning of its prompt, and a `LOCAL` or `GLOBAL` source badge. Duplicate titles remain separate entries.
 
-Search starts unfocused so navigation and action shortcuts are immediately available. Press `/` to focus it and show the text cursor. Search matches the title, description, and body and is case-insensitive. While search is focused, `Esc` clears the query and returns focus to the picker; `Enter` or `Tab` keeps the query and returns focus without inserting a prompt or changing scope. With search unfocused, `Enter` inserts the selected result.
+Search starts unfocused so navigation and action shortcuts are immediately available. Press `/` to focus it and show the text cursor. Search matches the title and prompt body, not frontmatter descriptions, and is case-insensitive. While search is focused, `Esc` clears the query and returns focus to the picker; `Enter` or `Tab` keeps the query and returns focus without inserting a prompt or changing scope. With search unfocused, `Enter` inserts the selected result.
 
 ## Managing prompts
 
@@ -102,7 +101,7 @@ Management actions open in-popup forms or confirmations. They operate on the sel
 - `d`: duplicate the selected prompt in a prefilled form, followed by a final confirmation
 - `m`: move the selected prompt directly to the opposite scope after an in-popup confirmation
 
-Create and duplicate forms contain title, description, multiline body, and destination fields. Duplicate shows the source title, proposed copy title, and destination for confirmation before writing; a failed write keeps the entered values available for correction and retry. Move has no destination picker: its label and confirmation identify the opposite scope, local to global or global to local. Filenames are generated from the title as slugs; when a slug already exists, a collision suffix is generated rather than replacing the existing file. Editing preserves the selected prompt's filename. Delete and move never affect a different prompt with the same title.
+Create and duplicate forms contain title, multiline prompt, and a Local/Global destination control. Edit forms contain only title and prompt. Duplicate shows the source title, proposed copy title, and destination for confirmation before writing; a failed write keeps the entered values available for correction and retry. Move has no destination picker: its label and confirmation identify the opposite scope, local to global or global to local. Filenames are generated from the title as slugs; when a slug already exists, a collision suffix is generated rather than replacing the existing file. Editing preserves the selected prompt's filename and existing frontmatter metadata. Delete and move never affect a different prompt with the same title.
 
 `Ctrl+S` saves the active form. `Tab` moves between form fields and `Esc` cancels the form or confirmation without inserting or changing files. Saved changes are picked up the next time the library is refreshed or reopened. Insertion sends only the selected Markdown body to the original pane and does not modify the prompt file.
 
@@ -119,7 +118,7 @@ Prompt titles are display metadata, not filenames or keys. Two files may have th
 - `up`/`down` or `j`/`k`: move through prompts
 - `pgup`/`pgdown` or `ctrl+u`/`ctrl+d`: scroll the preview
 - `home`/`end`: jump to the top or bottom of the preview
-- `/`: focus fuzzy search; type to filter titles, descriptions, and bodies
+- `/`: focus fuzzy search; type to filter titles and prompt bodies
 - `enter`/`Tab` while searching: keep the query and return focus to picker controls
 - `esc` while searching: clear the query and return focus to picker controls
 - `enter` while search is unfocused: insert the selected prompt into the pane that was focused before the popup opened
@@ -140,9 +139,9 @@ The popup resizes with Herdr. On wide terminals, the prompt list and preview are
 
 - **The keybinding does nothing:** confirm the plugin is linked and enabled with `herdr plugin list --plugin herdr.prompt-library`, then run `herdr server reload-config` after adding or changing the `[[keys.command]]` entry.
 - **No prompts appear:** verify the local or global `prompts/` directory contains recursive `.md` files. The global root is based on `herdr plugin config-dir herdr.prompt-library`.
-- **A file is skipped:** inspect the path-specific error for malformed frontmatter, a missing or blank `title` or body, an unsupported field type, or a permissions problem. Descriptions may be omitted or blank.
+- **A file is skipped:** inspect the path-specific error for malformed frontmatter, a missing or blank `title` or body, an unsupported field type, or a permissions problem.
 - **Create or duplicate refuses to save:** ensure the destination directory is writable. Filenames are generated from the title and receive a collision suffix automatically.
 - **Move refuses to save:** ensure the opposite-scope directory is writable; move always targets the opposite scope.
 - **A changed prompt is not visible:** close and reopen the picker. Prompt files are loaded on open.
 - **Insertion fails:** ensure Herdr is still running and that the pane that opened the picker still exists. The picker remains open so you can retry after fixing the problem.
-- **A different prompt was inserted:** duplicate titles are separate entries. Use the source badge, description, and preview to select the intended entry.
+- **A different prompt was inserted:** duplicate titles are separate entries. Use the source badge, prompt excerpt, and preview to select the intended entry.

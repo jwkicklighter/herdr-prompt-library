@@ -42,8 +42,7 @@ type InsertionResultMsg struct {
 }
 
 type promptItem struct {
-	prompt      config.Prompt
-	description string
+	prompt config.Prompt
 }
 
 // LibraryMutator is the storage used by prompt management actions.
@@ -66,7 +65,6 @@ const (
 type promptForm struct {
 	mode        formMode
 	title       textinput.Model
-	description textinput.Model
 	body        textarea.Model
 	destination string
 	focus       int
@@ -113,7 +111,7 @@ func (scope libraryScope) String() string {
 
 type promptDelegate struct{}
 
-func (promptDelegate) Height() int  { return 2 }
+func (promptDelegate) Height() int  { return 3 }
 func (promptDelegate) Spacing() int { return 1 }
 func (promptDelegate) Update(tea.Msg, *list.Model) tea.Cmd {
 	return nil
@@ -141,8 +139,9 @@ func (promptDelegate) Render(writer io.Writer, model list.Model, index int, raw 
 	if remaining := lineWidth - lipgloss.Width(name) - lipgloss.Width(badge) - 1; remaining >= 0 {
 		firstLine += strings.Repeat(" ", remaining+1) + badge
 	}
-	description := "  " + itemDescriptionStyle.MaxWidth(max(1, lineWidth-2)).Render(item.description)
-	fmt.Fprint(writer, firstLine+"\n"+description)
+	for _, excerpt := range promptExcerpt(item.prompt.Contents, max(1, lineWidth-2)) {
+		fmt.Fprint(writer, "\n  "+itemDescriptionStyle.Render(excerpt))
+	}
 }
 
 // Model is the Bubble Tea prompt picker model.
@@ -265,7 +264,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return model, nil
 		}
-		if message.String() == "?" && !model.searchFocused && (model.form == nil || model.form.focus == 3) {
+		if message.String() == "?" && !model.searchFocused && (model.form == nil || model.form.focus == 2) {
 			model.helpOpen = true
 			return model, nil
 		}
@@ -428,18 +427,15 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	title := textinput.New()
 	title.Prompt = ""
-	title.Placeholder = "Required title"
-	description := textinput.New()
-	description.Prompt = ""
-	description.Placeholder = "Optional description"
+	title.Placeholder = "e.g. Review a change"
 	body := textarea.New()
 	body.Prompt = ""
-	body.Placeholder = "Required prompt body"
+	body.Placeholder = "Describe the task and the output you need"
+	body.ShowLineNumbers = false
 
 	destination := model.defaultDestination()
 	if mode == editForm || mode == duplicateForm {
 		title.SetValue(prompt.Name)
-		description.SetValue(prompt.Description)
 		body.SetValue(prompt.Contents)
 		destination = prompt.Source
 	}
@@ -449,7 +445,6 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	form := &promptForm{
 		mode:        mode,
 		title:       title,
-		description: description,
 		body:        body,
 		destination: destination,
 		original:    prompt,
@@ -476,15 +471,12 @@ func (model Model) defaultDestination() string {
 func (model *Model) focusForm(index int) tea.Cmd {
 	form := model.form
 	form.title.Blur()
-	form.description.Blur()
 	form.body.Blur()
 	form.focus = index
 	switch index {
 	case 0:
 		return form.title.Focus()
 	case 1:
-		return form.description.Focus()
-	case 2:
 		return form.body.Focus()
 	}
 	return nil
@@ -501,15 +493,15 @@ func (model Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.saveForm()
 			return model, nil
 		case "tab":
-			last := 3
+			last := 2
 			if form.mode == editForm {
-				last = 2
+				last = 1
 			}
 			return model, model.focusForm((form.focus + 1) % (last + 1))
 		case "shift+tab":
-			last := 3
+			last := 2
 			if form.mode == editForm {
-				last = 2
+				last = 1
 			}
 			next := form.focus - 1
 			if next < 0 {
@@ -517,11 +509,11 @@ func (model Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return model, model.focusForm(next)
 		case "enter":
-			if form.focus < 2 {
+			if form.focus == 0 {
 				return model, model.focusForm(form.focus + 1)
 			}
-		case "left", "right", " ":
-			if form.focus == 3 {
+		case "left", "right", "space", " ":
+			if form.focus == 2 {
 				form.destination = otherSource(form.destination)
 				form.err = nil
 				return model, nil
@@ -534,8 +526,6 @@ func (model Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
 	case 0:
 		form.title, command = form.title.Update(message)
 	case 1:
-		form.description, command = form.description.Update(message)
-	case 2:
 		form.body, command = form.body.Update(message)
 	}
 	return model, command
@@ -549,9 +539,11 @@ func (model *Model) saveForm() {
 		return
 	}
 	changes := config.Prompt{
-		Name:        form.title.Value(),
-		Description: form.description.Value(),
-		Contents:    form.body.Value(),
+		Name:     form.title.Value(),
+		Contents: form.body.Value(),
+	}
+	if form.mode != createForm {
+		changes.Description = form.original.Description
 	}
 	var (
 		saved config.Prompt
@@ -612,7 +604,7 @@ func (model *Model) confirmDuplicate() {
 	form := model.form
 	changes := config.Prompt{
 		Name:        form.title.Value(),
-		Description: form.description.Value(),
+		Description: form.original.Description,
 		Contents:    form.body.Value(),
 	}
 	duplicated, err := model.libraries.Duplicate(form.original, form.destination, changes)
@@ -911,16 +903,13 @@ func (model *Model) refreshItems(target config.Prompt, preserve bool) {
 		if !model.inScope(prompt) {
 			continue
 		}
-		item := rankedItem{item: promptItem{prompt: prompt, description: prompt.Description}, order: index}
+		item := rankedItem{item: promptItem{prompt: prompt}, order: index}
 		if query != "" {
 			var matched bool
 			if item.score, matched = fuzzyScore(query, prompt.Name); matched {
-				item.field = 3
-			} else if item.score, matched = fuzzyScore(query, prompt.Description); matched {
 				item.field = 2
 			} else if item.score, matched = fuzzyScore(query, prompt.Contents); matched {
 				item.field = 1
-				item.item.description = matchingExcerpt(prompt.Contents, query)
 			} else {
 				continue
 			}
@@ -983,7 +972,7 @@ func promptMatchesQuery(prompt config.Prompt, query string) bool {
 	if query == "" {
 		return true
 	}
-	for _, value := range []string{prompt.Name, prompt.Description, prompt.Contents} {
+	for _, value := range []string{prompt.Name, prompt.Contents} {
 		if _, matched := fuzzyScore(query, value); matched {
 			return true
 		}
@@ -1022,36 +1011,56 @@ func fuzzyScore(query, candidate string) (int, bool) {
 	return 0, false
 }
 
-func matchingExcerpt(contents, query string) string {
-	compact := strings.Join(strings.Fields(contents), " ")
-	if compact == "" {
-		return "Match in prompt body"
-	}
-	lowerContents := strings.ToLower(compact)
-	lowerQuery := strings.ToLower(query)
-	startByte := strings.Index(lowerContents, lowerQuery)
-	if startByte < 0 {
-		startByte = 0
-		for _, character := range lowerQuery {
-			if offset := strings.IndexRune(lowerContents[startByte:], character); offset >= 0 {
-				startByte += offset
-				break
+// promptExcerpt provides a stable, compact preview even when a prompt starts
+// with blank lines or contains long unbroken text.
+func promptExcerpt(contents string, width int) []string {
+	words := strings.Fields(contents)
+	lines := make([]string, 0, 2)
+	current := ""
+	for _, word := range words {
+		for ansi.StringWidth(word) > width {
+			if current != "" {
+				lines = append(lines, current)
+				current = ""
+				if len(lines) == 2 {
+					return abbreviatedExcerpt(lines, width)
+				}
+			}
+			lines = append(lines, ansi.Cut(word, 0, width))
+			word = ansi.Cut(word, width, ansi.StringWidth(word))
+			if len(lines) == 2 {
+				return abbreviatedExcerpt(lines, width)
 			}
 		}
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if ansi.StringWidth(candidate) > width && current != "" {
+			lines = append(lines, current)
+			if len(lines) == 2 {
+				return abbreviatedExcerpt(lines, width)
+			}
+			current = word
+		} else {
+			current = candidate
+		}
 	}
-	const excerptLength = 72
-	runes := []rune(compact)
-	start := utf8.RuneCountInString(compact[:startByte])
-	start = max(0, start-excerptLength/3)
-	end := min(len(runes), start+excerptLength)
-	excerpt := string(runes[start:end])
-	if start > 0 {
-		excerpt = "..." + excerpt
+	if current != "" && len(lines) < 2 {
+		lines = append(lines, current)
 	}
-	if end < len(runes) {
-		excerpt += "..."
+	for len(lines) < 2 {
+		lines = append(lines, "")
 	}
-	return excerpt
+	return lines
+}
+
+func abbreviatedExcerpt(lines []string, width int) []string {
+	if width <= 3 {
+		return lines
+	}
+	lines[len(lines)-1] = ansi.Cut(lines[len(lines)-1], 0, width-3) + "..."
+	return lines
 }
 
 func (model Model) scopeTabs() string {
@@ -1107,14 +1116,14 @@ func (model Model) formPanel() string {
 		destination = "Global"
 	}
 	fieldWidth := model.formWidth()
-	lines := []string{titleStyle.Render(heading), "", formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Description", form.description.View(), fieldWidth, form.focus == 1), "", formField("Body", form.body.View(), fieldWidth, form.focus == 2)}
+	lines := []string{titleStyle.Render(heading), "", formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Prompt", form.body.View(), fieldWidth, form.focus == 1)}
 	if form.mode != editForm {
-		lines = append(lines, formLabel("Destination", form.focus == 3), "  < Local | Global >  "+destination)
+		lines = append(lines, destinationControl(destination, form.focus == 2))
 	}
 	if form.err != nil {
 		lines = append(lines, "", errorStyle.Render("Could not save prompt: ")+form.err.Error())
 	}
-	lines = append(lines, "", helpStyle.Render("Tab/Shift+Tab fields | Enter newline in body | arrows/space destination | Ctrl+S save | Esc cancel"))
+	lines = append(lines, "", helpStyle.Render("Tab/Shift+Tab fields | Enter newline in prompt | arrows/space destination | Ctrl+S save | Esc cancel"))
 	return panelStyle.Width(fieldWidth + panelStyle.GetHorizontalFrameSize()).Render(strings.Join(lines, "\n"))
 }
 
@@ -1124,9 +1133,8 @@ func (model *Model) sizeForm() {
 	}
 	inputWidth := max(1, model.formWidth()-2)
 	model.form.title.SetWidth(inputWidth)
-	model.form.description.SetWidth(inputWidth)
 	model.form.body.SetWidth(inputWidth)
-	model.form.body.SetHeight(max(3, model.height-21))
+	model.form.body.SetHeight(max(3, model.height-16))
 }
 
 func (model Model) formWidth() int {
@@ -1156,11 +1164,22 @@ func formField(label, contents string, width int, focused bool) string {
 	return top + "\n" + strings.Join(rows, "\n") + "\n" + bottom
 }
 
-func formLabel(label string, focused bool) string {
-	if focused {
-		return selectedItemNameStyle.Render("> " + label)
+func destinationControl(destination string, focused bool) string {
+	selected := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(accentColor).Padding(0, 1)
+	unselected := lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 1)
+	local, global := unselected.Render("Local"), unselected.Render("Global")
+	if destination == config.SourceGlobal {
+		global = selected.Render("Global")
+	} else {
+		local = selected.Render("Local")
 	}
-	return itemNameStyle.Render("  " + label)
+	label := "Destination: "
+	if focused {
+		label = "> " + label
+	} else {
+		label = "  " + label
+	}
+	return formFieldLabelStyle.Render(label) + local + global
 }
 
 func (model Model) confirmationPanel() string {
