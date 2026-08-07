@@ -22,14 +22,15 @@ import (
 )
 
 const (
-	wideLayoutMinimum = 90
-	outerPadding      = 1
-	pickerPanelGap    = outerPadding
-	panelGap          = 2
-	panelInnerPadding = 1
-	chromeHeight      = 6
-	minimumPanelSize  = 3
-	searchCursor      = "▏"
+	wideLayoutMinimum  = 90
+	outerPadding       = 1
+	pickerPanelGap     = outerPadding
+	panelGap           = 2
+	panelInnerPadding  = 1
+	chromeHeight       = 6
+	minimumPanelSize   = 3
+	searchCursor       = "▏"
+	maximumPromptLines = 10_000
 )
 
 // SelectionMsg requests insertion of the selected prompt. The complete prompt
@@ -449,6 +450,9 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	body.Prompt = ""
 	body.Placeholder = "Describe the task and the output you need"
 	body.ShowLineNumbers = false
+	// Bubbles sizes its wrap cache from MaxHeight. Match its paste limit so
+	// large prompts do not repeatedly evict and re-wrap every pasted line.
+	body.MaxHeight = maximumPromptLines
 
 	destination := model.defaultDestination()
 	if mode == editForm || mode == duplicateForm {

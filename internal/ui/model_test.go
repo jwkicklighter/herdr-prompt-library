@@ -687,6 +687,41 @@ func TestFormBodyAcceptsBracketedPasteInEveryMode(t *testing.T) {
 	}
 }
 
+func TestFormBodyAcceptsLargeMultilinePasteExactly(t *testing.T) {
+	var pasted strings.Builder
+	for line := range 1_000 {
+		fmt.Fprintf(&pasted, "unique prompt line %04d\n", line)
+	}
+
+	model := NewWithLibraries(nil, fakeLibraries{})
+	model.openForm(createForm, config.Prompt{})
+	model.focusForm(1)
+	model = update(t, model, tea.PasteMsg{Content: pasted.String()})
+
+	if got := model.form.body.Value(); got != pasted.String() {
+		t.Fatalf("large pasted body length = %d, want %d exact bytes", len(got), pasted.Len())
+	}
+	if model.form.body.MaxHeight != maximumPromptLines {
+		t.Fatalf("body wrap cache capacity = %d, want %d", model.form.body.MaxHeight, maximumPromptLines)
+	}
+}
+
+func BenchmarkFormBodyPaste(b *testing.B) {
+	var pasted strings.Builder
+	for line := range 1_000 {
+		fmt.Fprintf(&pasted, "a moderately long pasted prompt line %04d\n", line)
+	}
+	contents := pasted.String()
+	b.ReportAllocs()
+	b.SetBytes(int64(len(contents)))
+	for b.Loop() {
+		model := NewWithLibraries(nil, fakeLibraries{})
+		model.openForm(createForm, config.Prompt{})
+		model.focusForm(1)
+		model.Update(tea.PasteMsg{Content: contents})
+	}
+}
+
 func TestFormTitleAcceptsBracketedPaste(t *testing.T) {
 	model := NewWithLibraries(nil, fakeLibraries{})
 	model = update(t, model, key("a"))
