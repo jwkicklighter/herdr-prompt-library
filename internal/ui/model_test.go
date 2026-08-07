@@ -184,6 +184,23 @@ func TestEscapeClearsQueryBeforeClosing(t *testing.T) {
 	}
 }
 
+func TestFocusedSearchFiltersAndClearsWithCodeOnlyKeyMessages(t *testing.T) {
+	model := New([]config.Prompt{
+		{Name: "Alpha", Contents: "first body", Source: config.SourceProject},
+		{Name: "Beta", Contents: "second body", Source: config.SourceGlobal},
+	})
+	model = update(t, model, tea.KeyPressMsg{Code: '/'})
+	model = update(t, model, tea.KeyPressMsg{Code: 'z'})
+	if model.query != "z" || len(model.list.Items()) != 0 {
+		t.Fatalf("code-only search query=%q items=%d, want no matches", model.query, len(model.list.Items()))
+	}
+
+	model = update(t, model, tea.KeyPressMsg{Code: tea.KeyEscape})
+	if model.query != "" || model.searchFocused || len(model.list.Items()) != 2 {
+		t.Fatalf("cleared search query=%q focused=%v items=%d", model.query, model.searchFocused, len(model.list.Items()))
+	}
+}
+
 func TestSearchStartsUnfocusedAndExitKeysPreserveExpectedState(t *testing.T) {
 	for _, exit := range []string{"enter", "tab"} {
 		t.Run(exit, func(t *testing.T) {
@@ -629,15 +646,27 @@ func TestDestinationControlKeyboardAndEditFormFields(t *testing.T) {
 	if model.form.focus != 2 {
 		t.Fatalf("destination focus = %d", model.form.focus)
 	}
-	model = update(t, model, key("right"))
+	model = update(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
 	if model.form.destination != config.SourceGlobal {
 		t.Fatalf("right did not select global: %q", model.form.destination)
+	}
+	model = update(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
+	if model.form.destination != config.SourceGlobal {
+		t.Fatalf("repeated right changed global destination: %q", model.form.destination)
+	}
+	model = update(t, model, tea.KeyPressMsg{Code: tea.KeyLeft})
+	if model.form.destination != config.SourceProject {
+		t.Fatalf("left did not select local: %q", model.form.destination)
+	}
+	model = update(t, model, tea.KeyPressMsg{Code: tea.KeyLeft})
+	if model.form.destination != config.SourceProject {
+		t.Fatalf("repeated left changed local destination: %q", model.form.destination)
 	}
 	if view := ansiEscape.ReplaceAllString(model.View().Content, ""); !contains(view, "Destination:", "Local", "Global") {
 		t.Errorf("segmented destination missing: %q", view)
 	}
-	model = update(t, model, key("space"))
-	if model.form.destination != config.SourceProject {
+	model = update(t, model, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+	if model.form.destination != config.SourceGlobal {
 		t.Fatalf("space did not change destination: %q", model.form.destination)
 	}
 	model = update(t, model, key("esc"))
@@ -645,6 +674,20 @@ func TestDestinationControlKeyboardAndEditFormFields(t *testing.T) {
 	view := ansiEscape.ReplaceAllString(model.View().Content, "")
 	if strings.Contains(view, "Destination:") || strings.Contains(view, "Description") || !strings.Contains(view, "Prompt") {
 		t.Errorf("edit fields = %q", view)
+	}
+}
+
+func TestDuplicateTitleCursorStartsAfterCopySuffix(t *testing.T) {
+	prompt := config.Prompt{Name: "Original", Contents: "body", Source: config.SourceProject, Path: "/project/original.md"}
+	model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
+	model = update(t, model, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	want := "Original copy"
+	if model.form == nil || model.form.title.Value() != want || model.form.title.Position() != len([]rune(want)) {
+		t.Fatalf("duplicate title=%q cursor=%d, want cursor after suffix", model.form.title.Value(), model.form.title.Position())
+	}
+	model = update(t, model, tea.KeyPressMsg{Code: '!', Text: "!"})
+	if got := model.form.title.Value(); got != want+"!" {
+		t.Fatalf("typing at duplicate cursor produced %q, want %q", got, want+"!")
 	}
 }
 

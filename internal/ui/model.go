@@ -303,8 +303,17 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return model, nil
 			}
-			if message.Text != "" {
-				model.query += message.Text
+			text := message.Text
+			if text == "" && message.Mod == 0 {
+				key := message.String()
+				if utf8.RuneCountInString(key) == 1 {
+					text = key
+				} else if message.Code == tea.KeySpace {
+					text = " "
+				}
+			}
+			if text != "" {
+				model.query += text
 				model.refreshItems(model.currentPrompt(), true)
 			}
 			return model, nil
@@ -446,6 +455,7 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	}
 	if mode == duplicateForm {
 		title.SetValue(prompt.Name + " copy")
+		title.CursorEnd()
 	}
 	form := &promptForm{
 		mode:        mode,
@@ -517,7 +527,19 @@ func (model Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
 			if form.focus == 0 {
 				return model, model.focusForm(form.focus + 1)
 			}
-		case "left", "right", "space", " ":
+		case "left":
+			if form.focus == 2 {
+				form.destination = config.SourceProject
+				form.err = nil
+				return model, nil
+			}
+		case "right":
+			if form.focus == 2 {
+				form.destination = config.SourceGlobal
+				form.err = nil
+				return model, nil
+			}
+		case "space", " ":
 			if form.focus == 2 {
 				form.destination = otherSource(form.destination)
 				form.err = nil
