@@ -33,6 +33,35 @@ func TestNavigationChangesSelectionAndPreview(t *testing.T) {
 	}
 }
 
+func TestJKNavigationRefreshesPreviewAndRememberedScopeSelection(t *testing.T) {
+	model := New([]config.Prompt{
+		{Name: "Local one", Description: "first", Contents: "local one body", Source: config.SourceProject},
+		{Name: "Local two", Description: "second", Contents: "local two body", Source: config.SourceProject},
+		{Name: "Global", Description: "global", Contents: "global body", Source: config.SourceGlobal},
+	})
+	model.setScope(localScope)
+
+	model = update(t, model, key("j"))
+	if model.currentPrompt().Name != "Local two" || model.preview.GetContent() != "local two body" {
+		t.Fatalf("after j: selected=%q preview=%q", model.currentPrompt().Name, model.preview.GetContent())
+	}
+	model.setScope(globalScope)
+	model.setScope(localScope)
+	if model.currentPrompt().Name != "Local two" {
+		t.Fatalf("remembered selection after j = %q", model.currentPrompt().Name)
+	}
+
+	model = update(t, model, key("k"))
+	if model.currentPrompt().Name != "Local one" || model.preview.GetContent() != "local one body" {
+		t.Fatalf("after k: selected=%q preview=%q", model.currentPrompt().Name, model.preview.GetContent())
+	}
+	model.setScope(globalScope)
+	model.setScope(localScope)
+	if model.currentPrompt().Name != "Local one" {
+		t.Fatalf("remembered selection after k = %q", model.currentPrompt().Name)
+	}
+}
+
 func TestEnterEmitsExactSelectionForDuplicateName(t *testing.T) {
 	model := newTestModel(t)
 	model = update(t, model, key("down"))
@@ -346,6 +375,28 @@ func TestCreatePromptsInBothScopesWithExactBody(t *testing.T) {
 	}
 }
 
+func TestCrossScopeCreateRevealsResultAndPreservesMatchingQuery(t *testing.T) {
+	libraries := uiTestLibraries(t)
+	existing := mustCreatePrompt(t, libraries, config.SourceProject, "Existing", "body")
+	model := NewWithLibraries([]config.Prompt{existing}, libraries)
+	model.setScope(localScope)
+	model.query = "New"
+	model.refreshItems(config.Prompt{}, false)
+	model = update(t, model, key("alt+a"))
+	model.form.title.SetValue("New global prompt")
+	model.form.description.SetValue("Description")
+	model.form.body.SetValue("new body")
+	model.form.destination = config.SourceGlobal
+	model = update(t, model, key("ctrl+s"))
+
+	if model.scope != globalScope || model.query != "New" || model.currentPrompt().Name != "New global prompt" {
+		t.Fatalf("cross-scope create: scope=%s query=%q selected=%#v", model.scope, model.query, model.currentPrompt())
+	}
+	if model.preview.GetContent() != "new body" || len(model.list.Items()) != 1 {
+		t.Errorf("cross-scope create preview=%q results=%d", model.preview.GetContent(), len(model.list.Items()))
+	}
+}
+
 func TestCreateValidationAndWriteErrorsPreserveForm(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	validationModel := NewWithLibraries(nil, libraries)
@@ -484,6 +535,39 @@ func TestDuplicatePrefillsAndAllowsCrossScopeDestination(t *testing.T) {
 	}
 }
 
+func TestDuplicatePreservesCustomFrontmatterAndRevealsCrossScopeResult(t *testing.T) {
+	libraries := uiTestLibraries(t)
+	path := filepath.Join(libraries.LocalDir, "original.md")
+	if err := os.MkdirAll(libraries.LocalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := "---\ntitle: Original\ndescription: Before\ncustom: keep-me\n---\nold body\n"
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := config.Prompt{Name: "Original", Description: "Before", Contents: "old body\n", Source: config.SourceProject, Path: path}
+	model := NewWithLibraries([]config.Prompt{original}, libraries)
+	model.setScope(localScope)
+	model.query = "Original"
+	model.refreshItems(original, true)
+	model = update(t, model, key("alt+u"))
+	model.form.title.SetValue("Fresh copy")
+	model.form.destination = config.SourceGlobal
+	model = update(t, model, key("ctrl+s"))
+
+	duplicate := model.currentPrompt()
+	if model.scope != globalScope || model.query != "" || duplicate.Name != "Fresh copy" || duplicate.Source != config.SourceGlobal {
+		t.Fatalf("cross-scope duplicate: scope=%s query=%q selected=%#v", model.scope, model.query, duplicate)
+	}
+	contents, err := os.ReadFile(duplicate.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(string(contents), "title: Fresh copy", "custom: keep-me", "old body\n") {
+		t.Errorf("duplicate did not retain custom frontmatter: %q", contents)
+	}
+}
+
 func TestDuplicateSameScopeAndWriteFailure(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	original := mustCreatePrompt(t, libraries, config.SourceGlobal, "Copy", "body")
@@ -495,7 +579,7 @@ func TestDuplicateSameScopeAndWriteFailure(t *testing.T) {
 	}
 
 	wantErr := errors.New("read-only library")
-	storage := fakeLibraries{createFunc: func(string, config.Prompt) (config.Prompt, error) {
+	storage := fakeLibraries{duplicateFunc: func(config.Prompt, string, config.Prompt) (config.Prompt, error) {
 		return config.Prompt{}, wantErr
 	}}
 	model = NewWithLibraries([]config.Prompt{original}, storage)
@@ -711,10 +795,11 @@ func key(value string) tea.KeyPressMsg {
 }
 
 type fakeLibraries struct {
-	createFunc func(string, config.Prompt) (config.Prompt, error)
-	updateFunc func(config.Prompt, config.Prompt) (config.Prompt, error)
-	deleteFunc func(config.Prompt) error
-	moveFunc   func(config.Prompt, string) (config.Prompt, error)
+	createFunc    func(string, config.Prompt) (config.Prompt, error)
+	updateFunc    func(config.Prompt, config.Prompt) (config.Prompt, error)
+	deleteFunc    func(config.Prompt) error
+	duplicateFunc func(config.Prompt, string, config.Prompt) (config.Prompt, error)
+	moveFunc      func(config.Prompt, string) (config.Prompt, error)
 }
 
 func (fake fakeLibraries) Create(source string, prompt config.Prompt) (config.Prompt, error) {
@@ -736,6 +821,13 @@ func (fake fakeLibraries) Delete(prompt config.Prompt) error {
 		return errors.New("unexpected Delete")
 	}
 	return fake.deleteFunc(prompt)
+}
+
+func (fake fakeLibraries) Duplicate(prompt config.Prompt, destination string, changes config.Prompt) (config.Prompt, error) {
+	if fake.duplicateFunc == nil {
+		return config.Prompt{}, errors.New("unexpected Duplicate")
+	}
+	return fake.duplicateFunc(prompt, destination, changes)
 }
 
 func (fake fakeLibraries) Move(prompt config.Prompt, destination string) (config.Prompt, error) {

@@ -49,6 +49,7 @@ type LibraryMutator interface {
 	Create(string, config.Prompt) (config.Prompt, error)
 	Update(config.Prompt, config.Prompt) (config.Prompt, error)
 	Delete(config.Prompt) error
+	Duplicate(config.Prompt, string, config.Prompt) (config.Prompt, error)
 	Move(config.Prompt, string) (config.Prompt, error)
 }
 
@@ -343,7 +344,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return model, nil
 			}
 			break
-		case "up":
+		case "up", "k":
 			before := model.list.Index()
 			model.list.CursorUp()
 			if model.list.Index() != before {
@@ -351,7 +352,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.refreshPreview()
 			}
 			return model, nil
-		case "down":
+		case "down", "j":
 			before := model.list.Index()
 			model.list.CursorDown()
 			if model.list.Index() != before {
@@ -516,6 +517,8 @@ func (model *Model) saveForm() {
 	)
 	if form.mode == editForm {
 		saved, err = model.libraries.Update(form.original, changes)
+	} else if form.mode == duplicateForm {
+		saved, err = model.libraries.Duplicate(form.original, form.destination, changes)
 	} else {
 		saved, err = model.libraries.Create(form.destination, changes)
 	}
@@ -529,7 +532,22 @@ func (model *Model) saveForm() {
 		model.prompts = append(model.prompts, saved)
 	}
 	model.form = nil
-	model.refreshItems(saved, true)
+	model.revealPrompt(saved)
+}
+
+func (model *Model) revealPrompt(prompt config.Prompt) {
+	if !model.inScope(prompt) {
+		model.rememberSelection()
+		if prompt.Source == config.SourceGlobal {
+			model.scope = globalScope
+		} else {
+			model.scope = localScope
+		}
+	}
+	if !promptMatchesQuery(prompt, model.query) {
+		model.query = ""
+	}
+	model.refreshItems(prompt, true)
 }
 
 func (model Model) updateConfirmation(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -813,6 +831,19 @@ func samePrompt(left, right config.Prompt) bool {
 	}
 	return left.Name == right.Name && left.Description == right.Description &&
 		left.Contents == right.Contents && left.Source == right.Source
+}
+
+func promptMatchesQuery(prompt config.Prompt, query string) bool {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return true
+	}
+	for _, value := range []string{prompt.Name, prompt.Description, prompt.Contents} {
+		if _, matched := fuzzyScore(query, value); matched {
+			return true
+		}
+	}
+	return false
 }
 
 func fuzzyScore(query, candidate string) (int, bool) {

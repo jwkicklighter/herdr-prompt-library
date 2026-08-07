@@ -172,6 +172,10 @@ func TestLibrariesRejectsInLibrarySymlinkAliasesWithoutMutatingTarget(t *testing
 			_, err := libraries.Update(prompt, Prompt{Name: "Changed", Description: "Changed", Contents: "changed"})
 			return err
 		}},
+		{"duplicate", func() error {
+			_, err := libraries.Duplicate(prompt, SourceGlobal, Prompt{Name: "Copy", Description: "Copy", Contents: "copy"})
+			return err
+		}},
 		{"move", func() error {
 			_, err := libraries.Move(prompt, SourceGlobal)
 			return err
@@ -201,7 +205,7 @@ func TestLibrariesDuplicateAndMovePreserveRawFileAcrossScopes(t *testing.T) {
 	path := writePromptFile(t, libraries.LocalDir, "original.md", raw)
 	prompt := Prompt{Name: "Original", Description: "Description", Contents: "  raw body\n", Source: SourceProject, Path: path}
 
-	duplicate, err := libraries.Duplicate(prompt, SourceGlobal)
+	duplicate, err := libraries.Duplicate(prompt, SourceGlobal, prompt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,11 +251,13 @@ func TestLibrariesDuplicateAndMovePreserveRawFileAcrossScopes(t *testing.T) {
 func TestLibrariesDuplicateAllowsSameScope(t *testing.T) {
 	libraries := testLibraries(t)
 	prompt := createTestPrompt(t, libraries, SourceGlobal, "Copy me")
-	duplicate, err := libraries.Duplicate(prompt, SourceGlobal)
+	changes := prompt
+	changes.Name = "Copy me copy"
+	duplicate, err := libraries.Duplicate(prompt, SourceGlobal, changes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if duplicate.Source != SourceGlobal || filepath.Base(duplicate.Path) != "copy-me-2.md" {
+	if duplicate.Source != SourceGlobal || filepath.Base(duplicate.Path) != "copy-me-copy.md" || duplicate.Name != changes.Name {
 		t.Errorf("duplicate = %#v", duplicate)
 	}
 }

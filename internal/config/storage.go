@@ -129,9 +129,9 @@ func (libraries Libraries) Delete(prompt Prompt) error {
 	return nil
 }
 
-// Duplicate copies the complete Markdown file into destination, preserving all
-// frontmatter metadata and the raw prompt body.
-func (libraries Libraries) Duplicate(prompt Prompt, destination string) (Prompt, error) {
+// Duplicate copies a prompt into destination, preserving unrecognized
+// frontmatter metadata while applying the requested editable fields.
+func (libraries Libraries) Duplicate(prompt Prompt, destination string, changes Prompt) (Prompt, error) {
 	path, err := libraries.safePromptPath(prompt)
 	if err != nil {
 		return Prompt{}, err
@@ -140,13 +140,20 @@ func (libraries Libraries) Duplicate(prompt Prompt, destination string) (Prompt,
 	if err != nil {
 		return Prompt{}, fmt.Errorf("read prompt %q: %w", path, err)
 	}
-	destinationPath, err := libraries.writeUnique(destination, slug(prompt.Name), contents)
+	duplicate := Prompt{Name: changes.Name, Description: changes.Description, Contents: changes.Contents, Source: destination}
+	if err := validate(duplicate); err != nil {
+		return Prompt{}, err
+	}
+	contents, err = rewritePrompt(contents, changes, path)
 	if err != nil {
 		return Prompt{}, err
 	}
-	prompt.Source = destination
-	prompt.Path = destinationPath
-	return prompt, nil
+	destinationPath, err := libraries.writeUnique(destination, slug(changes.Name), contents)
+	if err != nil {
+		return Prompt{}, err
+	}
+	duplicate.Path = destinationPath
+	return duplicate, nil
 }
 
 // Move atomically creates a collision-free copy in destination, then removes
@@ -294,6 +301,27 @@ func encodePrompt(title, description, body string) ([]byte, error) {
 		return nil, err
 	}
 	return append(append([]byte("---\n"), encoded...), append([]byte("---\n"), []byte(body)...)...), nil
+}
+
+func rewritePrompt(contents []byte, changes Prompt, path string) ([]byte, error) {
+	frontmatter, _, newline, err := splitFrontmatterStyle(contents)
+	if err != nil {
+		return nil, fmt.Errorf("read prompt %q: %w", path, err)
+	}
+	var metadata yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &metadata); err != nil {
+		return nil, fmt.Errorf("parse prompt frontmatter in %q: %w", path, err)
+	}
+	frontmatter, err = updateMetadata(frontmatter, newline, &metadata, changes.Name, changes.Description)
+	if err != nil {
+		return nil, fmt.Errorf("update prompt frontmatter in %q: %w", path, err)
+	}
+	updated := append([]byte("---"), newline...)
+	updated = append(updated, frontmatter...)
+	updated = append(updated, newline...)
+	updated = append(updated, "---"...)
+	updated = append(updated, newline...)
+	return append(updated, changes.Contents...), nil
 }
 
 func updateMetadata(frontmatter, newline []byte, document *yaml.Node, title, description string) ([]byte, error) {
