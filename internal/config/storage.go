@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -87,7 +88,7 @@ func (libraries Libraries) Update(prompt, changes Prompt) (Prompt, error) {
 	if err != nil {
 		return Prompt{}, fmt.Errorf("read prompt %q: %w", path, err)
 	}
-	frontmatter, _, err := splitFrontmatter(contents)
+	frontmatter, _, newline, err := splitFrontmatterStyle(contents)
 	if err != nil {
 		return Prompt{}, fmt.Errorf("read prompt %q: %w", path, err)
 	}
@@ -96,21 +97,21 @@ func (libraries Libraries) Update(prompt, changes Prompt) (Prompt, error) {
 	if err := yaml.Unmarshal(frontmatter, &metadata); err != nil {
 		return Prompt{}, fmt.Errorf("parse prompt frontmatter in %q: %w", path, err)
 	}
-	if err := replaceMetadata(&metadata, "title", changes.Name); err != nil {
-		return Prompt{}, fmt.Errorf("update prompt frontmatter in %q: %w", path, err)
-	}
-	if err := replaceMetadata(&metadata, "description", changes.Description); err != nil {
+	frontmatter, err = updateMetadata(frontmatter, newline, &metadata, changes.Name, changes.Description)
+	if err != nil {
 		return Prompt{}, fmt.Errorf("update prompt frontmatter in %q: %w", path, err)
 	}
 	updated := Prompt{Name: changes.Name, Description: changes.Description, Contents: changes.Contents, Source: prompt.Source, Path: prompt.Path}
 	if err := validate(updated); err != nil {
 		return Prompt{}, err
 	}
-	encoded, err := yaml.Marshal(&metadata)
-	if err != nil {
-		return Prompt{}, fmt.Errorf("encode prompt frontmatter in %q: %w", path, err)
-	}
-	if err := atomicReplace(path, append(append([]byte("---\n"), encoded...), append([]byte("---\n"), []byte(updated.Contents)...)...)); err != nil {
+	updatedContents := append([]byte("---"), newline...)
+	updatedContents = append(updatedContents, frontmatter...)
+	updatedContents = append(updatedContents, newline...)
+	updatedContents = append(updatedContents, "---"...)
+	updatedContents = append(updatedContents, newline...)
+	updatedContents = append(updatedContents, updated.Contents...)
+	if err := atomicReplace(path, updatedContents); err != nil {
 		return Prompt{}, fmt.Errorf("update prompt %q: %w", path, err)
 	}
 	return updated, nil
@@ -220,15 +221,39 @@ func (libraries Libraries) safePromptPath(prompt Prompt) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	path, err := filepath.Abs(prompt.Path)
+	if err != nil {
+		return "", fmt.Errorf("resolve prompt path %q: %w", prompt.Path, err)
+	}
+	inside, err := pathInside(root, path)
+	if err != nil {
+		return "", err
+	}
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("resolve %s prompt directory %q: %w", prompt.Source, root, err)
 	}
-	path, err := filepath.EvalSymlinks(prompt.Path)
+	if !inside {
+		inside, err = pathInside(resolvedRoot, path)
+		if err != nil {
+			return "", err
+		}
+	}
+	if !inside {
+		return "", fmt.Errorf("prompt path %q is outside %s prompt directory %q", prompt.Path, prompt.Source, root)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect prompt path %q: %w", prompt.Path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("prompt path %q is a symlink", prompt.Path)
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		return "", fmt.Errorf("resolve prompt path %q: %w", prompt.Path, err)
 	}
-	inside, err := pathInside(resolvedRoot, path)
+	inside, err = pathInside(resolvedRoot, resolvedPath)
 	if err != nil {
 		return "", err
 	}
@@ -271,19 +296,83 @@ func encodePrompt(title, description, body string) ([]byte, error) {
 	return append(append([]byte("---\n"), encoded...), append([]byte("---\n"), []byte(body)...)...), nil
 }
 
-func replaceMetadata(document *yaml.Node, key, value string) error {
+func updateMetadata(frontmatter, newline []byte, document *yaml.Node, title, description string) ([]byte, error) {
 	if document.Kind != yaml.DocumentNode || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
-		return errors.New("frontmatter must be a mapping")
+		return nil, errors.New("frontmatter must be a mapping")
 	}
 	mapping := document.Content[0]
-	for index := 0; index < len(mapping.Content); index += 2 {
-		if mapping.Content[index].Value == key {
-			mapping.Content[index+1] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-			return nil
-		}
+	type replacement struct {
+		start int
+		end   int
+		value []byte
 	}
-	mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
-	return nil
+	lineOffsets := []int{0}
+	for index := 0; index < len(frontmatter); {
+		if next := bytes.Index(frontmatter[index:], newline); next >= 0 {
+			index += next + len(newline)
+			lineOffsets = append(lineOffsets, index)
+			continue
+		}
+		break
+	}
+	fields := []struct {
+		key   string
+		value string
+	}{{"title", title}, {"description", description}}
+	var replacements []replacement
+	for index := 0; index < len(mapping.Content); index += 2 {
+		key := mapping.Content[index]
+		fieldIndex := -1
+		for candidate, field := range fields {
+			if field.key == key.Value {
+				fieldIndex = candidate
+				break
+			}
+		}
+		if fieldIndex < 0 {
+			continue
+		}
+		if key.Line < 1 || key.Line > len(lineOffsets) {
+			return nil, fmt.Errorf("locate %s field", key.Value)
+		}
+		end := len(frontmatter)
+		if index+2 < len(mapping.Content) {
+			nextLine := mapping.Content[index+2].Line
+			if nextLine >= 1 && nextLine <= len(lineOffsets) {
+				end = lineOffsets[nextLine-1]
+			}
+		}
+		encoded, err := yaml.Marshal(fields[fieldIndex].value)
+		if err != nil {
+			return nil, err
+		}
+		encoded = bytes.TrimSuffix(encoded, []byte("\n"))
+		encoded = bytes.ReplaceAll(encoded, []byte("\n"), newline)
+		replacementValue := append([]byte(key.Value+": "), encoded...)
+		if end < len(frontmatter) {
+			replacementValue = append(replacementValue, newline...)
+		}
+		replacements = append(replacements, replacement{lineOffsets[key.Line-1], end, replacementValue})
+		fields = append(fields[:fieldIndex], fields[fieldIndex+1:]...)
+	}
+	for index := len(replacements) - 1; index >= 0; index-- {
+		replacement := replacements[index]
+		frontmatter = append(append(append([]byte{}, frontmatter[:replacement.start]...), replacement.value...), frontmatter[replacement.end:]...)
+	}
+	for _, field := range fields {
+		encoded, err := yaml.Marshal(field.value)
+		if err != nil {
+			return nil, err
+		}
+		encoded = bytes.TrimSuffix(encoded, []byte("\n"))
+		encoded = bytes.ReplaceAll(encoded, []byte("\n"), newline)
+		if len(frontmatter) > 0 {
+			frontmatter = append(frontmatter, newline...)
+		}
+		frontmatter = append(frontmatter, []byte(field.key+": ")...)
+		frontmatter = append(frontmatter, encoded...)
+	}
+	return frontmatter, nil
 }
 
 var invalidSlug = regexp.MustCompile(`[^a-z0-9]+`)

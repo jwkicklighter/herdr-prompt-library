@@ -14,6 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var walkDirectory = filepath.WalkDir
+
 const (
 	// SourceProject identifies prompts declared by the current project.
 	SourceProject = "project"
@@ -76,21 +78,22 @@ func loadDirectory(path, source string) ([]Prompt, error) {
 	}
 
 	var paths []string
-	if err := filepath.WalkDir(path, func(filePath string, entry fs.DirEntry, err error) error {
+	var errs []error
+	if err := walkDirectory(path, func(filePath string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("traverse %s prompts at %q: %w", source, filePath, err))
+			return nil
 		}
 		if !entry.IsDir() && strings.EqualFold(filepath.Ext(filePath), ".md") {
 			paths = append(paths, filePath)
 		}
 		return nil
 	}); err != nil {
-		return nil, fmt.Errorf("load %s prompts from %q: %w", source, path, err)
+		errs = append(errs, fmt.Errorf("load %s prompts from %q: %w", source, path, err))
 	}
 	sort.Strings(paths)
 
 	var prompts []Prompt
-	var errs []error
 	for _, filePath := range paths {
 		prompt, err := loadPrompt(filePath, source)
 		if err != nil {
@@ -131,6 +134,11 @@ func loadPrompt(path, source string) (Prompt, error) {
 }
 
 func splitFrontmatter(contents []byte) ([]byte, []byte, error) {
+	frontmatter, body, _, err := splitFrontmatterStyle(contents)
+	return frontmatter, body, err
+}
+
+func splitFrontmatterStyle(contents []byte) ([]byte, []byte, []byte, error) {
 	for _, newline := range [][]byte{[]byte("\n"), []byte("\r\n")} {
 		opening := append([]byte("---"), newline...)
 		if !bytes.HasPrefix(contents, opening) {
@@ -139,24 +147,27 @@ func splitFrontmatter(contents []byte) ([]byte, []byte, error) {
 		frontmatter := contents[len(opening):]
 		closing := append(append([]byte{}, newline...), []byte("---")...)
 		if index := bytes.Index(frontmatter, append(closing, newline...)); index >= 0 {
-			return frontmatter[:index], frontmatter[index+len(closing)+len(newline):], nil
+			return frontmatter[:index], frontmatter[index+len(closing)+len(newline):], newline, nil
 		}
 		if bytes.HasSuffix(frontmatter, closing) {
-			return frontmatter[:len(frontmatter)-len(closing)], nil, nil
+			return frontmatter[:len(frontmatter)-len(closing)], nil, newline, nil
 		}
-		return nil, nil, errors.New("missing YAML frontmatter closing delimiter")
+		return nil, nil, nil, errors.New("missing YAML frontmatter closing delimiter")
 	}
-	return nil, nil, errors.New("missing YAML frontmatter opening delimiter")
+	return nil, nil, nil, errors.New("missing YAML frontmatter opening delimiter")
 }
 
 func validate(prompt Prompt) error {
-	for field, value := range map[string]string{
-		"title":       prompt.Name,
-		"description": prompt.Description,
-		"contents":    prompt.Contents,
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"title", prompt.Name},
+		{"description", prompt.Description},
+		{"contents", prompt.Contents},
 	} {
-		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("%s must not be blank", field)
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%s must not be blank", field.name)
 		}
 	}
 	return nil

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +122,59 @@ func TestLoadFilesRetainsValidPromptsAlongsideMalformedFiles(t *testing.T) {
 	}
 	if len(prompts) != 1 || prompts[0].Path != good {
 		t.Errorf("prompts = %#v, want valid prompt", prompts)
+	}
+}
+
+func TestLoadFilesRetainsPromptsDiscoveredAroundTraversalErrors(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "prompts")
+	first := writePromptFile(t, path, "first.md", promptFile("first", "First", "first"))
+	second := writePromptFile(t, path, "second.md", promptFile("second", "Second", "second"))
+
+	original := walkDirectory
+	walkDirectory = func(root string, walk fs.WalkDirFunc) error {
+		for _, filePath := range []string{first, filepath.Join(root, "restricted"), second} {
+			if filePath == filepath.Join(root, "restricted") {
+				if err := walk(filePath, nil, errors.New("permission denied")); err != nil {
+					return err
+				}
+				continue
+			}
+			info, err := os.Stat(filePath)
+			if err != nil {
+				return err
+			}
+			if err := walk(filePath, fs.FileInfoToDirEntry(info), nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	t.Cleanup(func() { walkDirectory = original })
+
+	prompts, err := LoadFiles("", path)
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(path, "restricted")) || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("error = %v, want path-specific traversal error", err)
+	}
+	if len(prompts) != 2 || prompts[0].Path != first || prompts[1].Path != second {
+		t.Errorf("prompts = %#v, want both discovered prompts", prompts)
+	}
+}
+
+func TestValidateReportsBlankFieldsInDeterministicOrder(t *testing.T) {
+	for _, test := range []struct {
+		prompt Prompt
+		want   string
+	}{
+		{Prompt{}, "title must not be blank"},
+		{Prompt{Name: "title"}, "description must not be blank"},
+		{Prompt{Name: "title", Description: "description"}, "contents must not be blank"},
+	} {
+		for range 20 {
+			if err := validate(test.prompt); err == nil || err.Error() != test.want {
+				t.Errorf("validate = %v, want %q", err, test.want)
+			}
+		}
 	}
 }
 

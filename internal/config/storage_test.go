@@ -80,6 +80,26 @@ func TestLibrariesUpdatePreservesFilenameUnknownMetadataAndBody(t *testing.T) {
 	}
 }
 
+func TestLibrariesUpdatePreservesCRLFFrontmatterFraming(t *testing.T) {
+	libraries := testLibraries(t)
+	path := writePromptFile(t, libraries.LocalDir, "original.md", "---\r\ntitle: Original\r\ndescription: Before\r\ncustom: [one, two]\r\n---\r\nold body\r\n")
+	prompt := Prompt{Name: "Original", Description: "Before", Contents: "old body\r\n", Source: SourceProject, Path: path}
+	if _, err := libraries.Update(prompt, Prompt{Name: "Changed", Description: "After", Contents: "new body\r\n"}); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ReplaceAll(string(contents), "\r\n", ""), "\n") {
+		t.Errorf("update changed CRLF framing: %q", contents)
+	}
+	want := "---\r\ntitle: Changed\r\ndescription: After\r\ncustom: [one, two]\r\n---\r\nnew body\r\n"
+	if string(contents) != want {
+		t.Errorf("contents = %q, want %q", contents, want)
+	}
+}
+
 func TestLibrariesUpdateFailureLeavesFileIntact(t *testing.T) {
 	libraries := testLibraries(t)
 	prompt := createTestPrompt(t, libraries, SourceProject, "Original")
@@ -118,16 +138,60 @@ func TestLibrariesDeleteRejectsOutsideAndSymlinkEscapes(t *testing.T) {
 		}(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := libraries.Delete(prompt); err == nil || !strings.Contains(err.Error(), "outside") {
-				t.Errorf("Delete error = %v, want outside-library rejection", err)
+			if err := libraries.Delete(prompt); err == nil || (!strings.Contains(err.Error(), "outside") && !strings.Contains(err.Error(), "symlink")) {
+				t.Errorf("Delete error = %v, want outside-library or symlink rejection", err)
 			}
-			if _, err := libraries.Update(prompt, Prompt{Name: "Changed", Description: "Changed", Contents: "changed"}); err == nil || !strings.Contains(err.Error(), "outside") {
-				t.Errorf("Update error = %v, want outside-library rejection", err)
+			if _, err := libraries.Update(prompt, Prompt{Name: "Changed", Description: "Changed", Contents: "changed"}); err == nil || (!strings.Contains(err.Error(), "outside") && !strings.Contains(err.Error(), "symlink")) {
+				t.Errorf("Update error = %v, want outside-library or symlink rejection", err)
 			}
 		})
 	}
 	if _, err := os.Stat(outside); err != nil {
 		t.Errorf("outside prompt was modified: %v", err)
+	}
+}
+
+func TestLibrariesRejectsInLibrarySymlinkAliasesWithoutMutatingTarget(t *testing.T) {
+	libraries := testLibraries(t)
+	target := writePromptFile(t, libraries.LocalDir, "target.md", promptFile("Target", "Original", "body"))
+	alias := filepath.Join(libraries.LocalDir, "alias.md")
+	if err := os.Symlink(target, alias); err != nil {
+		t.Fatal(err)
+	}
+	prompt := Prompt{Name: "Target", Description: "Original", Contents: "body", Source: SourceProject, Path: alias}
+	before, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []struct {
+		name string
+		run  func() error
+	}{
+		{"delete", func() error { return libraries.Delete(prompt) }},
+		{"update", func() error {
+			_, err := libraries.Update(prompt, Prompt{Name: "Changed", Description: "Changed", Contents: "changed"})
+			return err
+		}},
+		{"move", func() error {
+			_, err := libraries.Move(prompt, SourceGlobal)
+			return err
+		}},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			if err := operation.run(); err == nil || !strings.Contains(err.Error(), "symlink") {
+				t.Errorf("operation error = %v, want symlink rejection", err)
+			}
+			after, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Errorf("target was modified: %q", after)
+			}
+			if info, err := os.Lstat(alias); err != nil || info.Mode()&os.ModeSymlink == 0 {
+				t.Errorf("alias was changed: %v, %#v", err, info)
+			}
+		})
 	}
 }
 
