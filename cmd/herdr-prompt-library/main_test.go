@@ -9,8 +9,6 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/BurntSushi/toml"
-
 	"herdr-prompt-library/internal/config"
 	"herdr-prompt-library/internal/herdr"
 	"herdr-prompt-library/internal/ui"
@@ -209,56 +207,29 @@ func TestCommandRejectsInvalidArguments(t *testing.T) {
 }
 
 func TestManifestEntrypointsUseExplicitRelativePaths(t *testing.T) {
-	var manifest struct {
-		ID      string `toml:"id"`
-		Actions []struct {
-			ID      string   `toml:"id"`
-			Command []string `toml:"command"`
-		} `toml:"actions"`
-		Panes []struct {
-			Command []string `toml:"command"`
-		} `toml:"panes"`
-	}
 	path := filepath.Join("..", "..", "herdr-plugin.toml")
-	if _, err := toml.DecodeFile(path, &manifest); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
+	manifest, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
 	}
-	if manifest.ID != herdr.PluginID {
-		t.Errorf("plugin ID = %q, want %q", manifest.ID, herdr.PluginID)
-	}
-	for _, command := range manifest.Actions {
-		if len(command.Command) == 0 || !strings.HasPrefix(command.Command[0], "./") {
-			t.Errorf("action command = %#v, want an explicit relative executable path", command.Command)
-		}
-	}
-	for _, command := range manifest.Panes {
-		if len(command.Command) == 0 || !strings.HasPrefix(command.Command[0], "./") {
-			t.Errorf("pane command = %#v, want an explicit relative executable path", command.Command)
+	for _, want := range []string{
+		`id = "` + herdr.PluginID + `"`,
+		`command = ["./bin/herdr-prompt-library", "open"]`,
+		`command = ["./bin/herdr-prompt-library", "picker"]`,
+	} {
+		if !strings.Contains(string(manifest), want) {
+			t.Errorf("manifest does not contain %q", want)
 		}
 	}
 }
 
 func TestReadmeDocumentsQualifiedManifestActionID(t *testing.T) {
-	var manifest struct {
-		ID      string `toml:"id"`
-		Actions []struct {
-			ID string `toml:"id"`
-		} `toml:"actions"`
-	}
-	manifestPath := filepath.Join("..", "..", "herdr-plugin.toml")
-	if _, err := toml.DecodeFile(manifestPath, &manifest); err != nil {
-		t.Fatalf("decode %s: %v", manifestPath, err)
-	}
-	if len(manifest.Actions) != 1 {
-		t.Fatalf("action count = %d, want 1", len(manifest.Actions))
-	}
-
 	readmePath := filepath.Join("..", "..", "README.md")
 	readme, err := os.ReadFile(readmePath)
 	if err != nil {
 		t.Fatalf("read %s: %v", readmePath, err)
 	}
-	qualifiedActionID := manifest.ID + "." + manifest.Actions[0].ID
+	qualifiedActionID := herdr.PluginID + ".open"
 	for _, want := range []string{
 		"type = \"plugin_action\"\ncommand = \"" + qualifiedActionID + "\"",
 		"herdr plugin action invoke " + qualifiedActionID,
@@ -267,7 +238,7 @@ func TestReadmeDocumentsQualifiedManifestActionID(t *testing.T) {
 			t.Errorf("README does not document %q", want)
 		}
 	}
-	obsoleteKeybinding := "type = \"plugin_action\"\ncommand = \"" + manifest.ID + ":" + manifest.Actions[0].ID + "\""
+	obsoleteKeybinding := "type = \"plugin_action\"\ncommand = \"" + herdr.PluginID + ":open\""
 	if strings.Contains(string(readme), obsoleteKeybinding) {
 		t.Errorf("README documents obsolete colon-qualified action keybinding %q", obsoleteKeybinding)
 	}

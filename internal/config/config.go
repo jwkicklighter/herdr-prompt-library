@@ -1,14 +1,17 @@
-// Package config loads prompt definitions from Herdr configuration files.
+// Package config loads prompt definitions from Markdown files.
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -24,20 +27,16 @@ type Prompt struct {
 	Description string
 	Contents    string
 	Source      string
-}
-
-type promptFile struct {
-	Prompts []promptDefinition `toml:"prompts"`
+	Path        string
 }
 
 type promptDefinition struct {
-	Name        string `toml:"name"`
-	Description string `toml:"description"`
-	Contents    string `toml:"contents"`
+	Name        string `yaml:"title"`
+	Description string `yaml:"description"`
 }
 
-// Load reads global prompts from $HERDR_PLUGIN_CONFIG_DIR/prompts.toml and
-// project prompts from .herdr/prompts.toml below HERDR_PROMPT_LIBRARY_PROJECT_ROOT.
+// Load reads global prompts from $HERDR_PLUGIN_CONFIG_DIR/prompts and project
+// prompts from .herdr/prompts below HERDR_PROMPT_LIBRARY_PROJECT_ROOT.
 // When that variable is absent, the current working directory is the project root.
 func Load() ([]Prompt, error) {
 	projectRoot := os.Getenv("HERDR_PROMPT_LIBRARY_PROJECT_ROOT")
@@ -51,64 +50,113 @@ func Load() ([]Prompt, error) {
 
 	globalPath := ""
 	if configDirectory := os.Getenv("HERDR_PLUGIN_CONFIG_DIR"); configDirectory != "" {
-		globalPath = filepath.Join(configDirectory, "prompts.toml")
+		globalPath = filepath.Join(configDirectory, "prompts")
 	}
 
-	return LoadFiles(globalPath, filepath.Join(projectRoot, ".herdr", "prompts.toml"))
+	return LoadFiles(globalPath, filepath.Join(projectRoot, ".herdr", "prompts"))
 }
 
-// LoadFiles reads project and global prompt files. Empty and missing paths are
+// LoadFiles reads project and global prompt directories. Empty and missing paths are
 // empty scopes. Project prompts are returned before global prompts.
 func LoadFiles(globalPath, projectPath string) ([]Prompt, error) {
-	global, err := loadFile(globalPath, SourceGlobal)
-	if err != nil {
-		return nil, err
-	}
-	project, err := loadFile(projectPath, SourceProject)
-	if err != nil {
-		return nil, err
-	}
-
-	return append(project, global...), nil
+	global, globalErr := loadDirectory(globalPath, SourceGlobal)
+	project, projectErr := loadDirectory(projectPath, SourceProject)
+	return append(project, global...), errors.Join(projectErr, globalErr)
 }
 
-func loadFile(path, source string) ([]Prompt, error) {
+func loadDirectory(path, source string) ([]Prompt, error) {
 	if path == "" {
 		return nil, nil
 	}
-
-	var file promptFile
-	if _, err := toml.DecodeFile(path, &file); err != nil {
+	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("load %s prompts from %q: %w", source, path, err)
 	}
 
-	prompts := make([]Prompt, len(file.Prompts))
-	for index, definition := range file.Prompts {
-		if err := validate(definition, path, index+1); err != nil {
-			return nil, err
+	var paths []string
+	if err := filepath.WalkDir(path, func(filePath string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		prompts[index] = Prompt{
-			Name:        definition.Name,
-			Description: definition.Description,
-			Contents:    definition.Contents,
-			Source:      source,
+		if !entry.IsDir() && strings.EqualFold(filepath.Ext(filePath), ".md") {
+			paths = append(paths, filePath)
 		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("load %s prompts from %q: %w", source, path, err)
 	}
+	sort.Strings(paths)
 
-	return prompts, nil
+	var prompts []Prompt
+	var errs []error
+	for _, filePath := range paths {
+		prompt, err := loadPrompt(filePath, source)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		prompts = append(prompts, prompt)
+	}
+	return prompts, errors.Join(errs...)
 }
 
-func validate(prompt promptDefinition, path string, number int) error {
+func loadPrompt(path, source string) (Prompt, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return Prompt{}, fmt.Errorf("load %s prompt from %q: %w", source, path, err)
+	}
+
+	frontmatter, body, err := splitFrontmatter(contents)
+	if err != nil {
+		return Prompt{}, fmt.Errorf("invalid %s prompt in %q: %w", source, path, err)
+	}
+
+	var definition promptDefinition
+	if err := yaml.Unmarshal(frontmatter, &definition); err != nil {
+		return Prompt{}, fmt.Errorf("parse %s prompt frontmatter in %q: %w", source, path, err)
+	}
+	prompt := Prompt{
+		Name:        definition.Name,
+		Description: definition.Description,
+		Contents:    string(body),
+		Source:      source,
+		Path:        path,
+	}
+	if err := validate(prompt); err != nil {
+		return Prompt{}, fmt.Errorf("invalid %s prompt in %q: %w", source, path, err)
+	}
+	return prompt, nil
+}
+
+func splitFrontmatter(contents []byte) ([]byte, []byte, error) {
+	for _, newline := range [][]byte{[]byte("\n"), []byte("\r\n")} {
+		opening := append([]byte("---"), newline...)
+		if !bytes.HasPrefix(contents, opening) {
+			continue
+		}
+		frontmatter := contents[len(opening):]
+		closing := append(append([]byte{}, newline...), []byte("---")...)
+		if index := bytes.Index(frontmatter, append(closing, newline...)); index >= 0 {
+			return frontmatter[:index], frontmatter[index+len(closing)+len(newline):], nil
+		}
+		if bytes.HasSuffix(frontmatter, closing) {
+			return frontmatter[:len(frontmatter)-len(closing)], nil, nil
+		}
+		return nil, nil, errors.New("missing YAML frontmatter closing delimiter")
+	}
+	return nil, nil, errors.New("missing YAML frontmatter opening delimiter")
+}
+
+func validate(prompt Prompt) error {
 	for field, value := range map[string]string{
-		"name":        prompt.Name,
+		"title":       prompt.Name,
 		"description": prompt.Description,
 		"contents":    prompt.Contents,
 	} {
 		if strings.TrimSpace(value) == "" {
-			return fmt.Errorf("invalid prompt %d in %q: %s must not be blank", number, path, field)
+			return fmt.Errorf("%s must not be blank", field)
 		}
 	}
 	return nil
