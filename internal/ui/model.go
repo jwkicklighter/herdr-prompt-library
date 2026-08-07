@@ -1030,11 +1030,15 @@ func fuzzyScore(query, candidate string) (int, bool) {
 		if character != needle[queryIndex] {
 			continue
 		}
+		atBoundary := index == 0 || unicode.IsSpace(haystack[index-1]) || strings.ContainsRune("-_/.", haystack[index-1])
+		if queryIndex > 0 && index-previous > 3 && !atBoundary {
+			continue
+		}
 		score += 10
 		if index == previous+1 {
 			score += 8
 		}
-		if index == 0 || unicode.IsSpace(haystack[index-1]) || strings.ContainsRune("-_/.", haystack[index-1]) {
+		if atBoundary {
 			score += 5
 		}
 		if queryIndex == 0 {

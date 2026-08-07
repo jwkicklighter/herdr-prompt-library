@@ -122,6 +122,7 @@ func TestFuzzySearchExcludesDescriptionsAndKeepsBodyExcerpts(t *testing.T) {
 		{Name: "Body match", Description: "Only in contents", Contents: "Run the deploy production checklist carefully", Source: config.SourceProject},
 		{Name: "Description match", Description: "Deploy production safely", Contents: "unrelated", Source: config.SourceGlobal},
 		{Name: "Deploy production", Description: "Title match", Contents: "unrelated", Source: config.SourceProject},
+		{Name: "Scattered letters", Contents: "stored material, wrapped loosely", Source: config.SourceGlobal},
 	}, nil)
 	model = update(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
 	model = update(t, model, key("/"))
