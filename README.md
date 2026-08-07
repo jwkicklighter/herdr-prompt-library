@@ -81,7 +81,7 @@ The closing frontmatter delimiter must be on its own line. Everything after it i
 
 ## Herdr context and placeholders
 
-Herdr 0.8.0 passes action context to plugins through `HERDR_PLUGIN_CONTEXT_JSON`, and Prompt Library carries that official context unchanged into the picker. The current Herdr plugin contract does not define a placeholder syntax or any official placeholder names, however, so Prompt Library does not invent its own variables. Text that looks like a template token is saved and inserted literally, byte for byte.
+Herdr 0.8.0 passes action context to plugins through `HERDR_PLUGIN_CONTEXT_JSON`. Prompt Library reads only the focused pane ID and project-root fields needed to open the picker; it does not forward the raw context into the picker. The current Herdr plugin contract does not define a placeholder syntax or any official placeholder names, so Prompt Library does not invent its own variables. Text that looks like a template token is saved and inserted literally, byte for byte.
 
 The editor shows this limitation in its placeholder area. On wide panes it appears as a right sidebar; on narrow panes it collapses to a compact status line. Placeholder navigation and insertion will only be enabled when Herdr publishes an official token contract.
 

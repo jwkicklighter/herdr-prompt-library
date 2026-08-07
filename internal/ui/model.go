@@ -266,7 +266,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return model, nil
 		}
-		if message.String() == "?" && !model.searchFocused && (model.form == nil || model.form.focus == 2) {
+		if message.String() == "?" && !model.searchFocused && (model.confirmation != nil || model.form == nil || model.form.focus == 2) {
 			model.helpOpen = true
 			return model, nil
 		}
@@ -407,6 +407,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return model, nil
 		}
 	case tea.PasteMsg:
+		if model.helpOpen || model.confirmation != nil {
+			return model, nil
+		}
 		if model.form != nil {
 			return model.updateForm(message)
 		}
@@ -1270,12 +1273,15 @@ func (model Model) hotkeyPanel() string {
 		keys   string
 		action string
 	}{
-		{"Navigation", "up/down, j/k", "select prompt; Tab changes scope"},
-		{"Search", "/", "focus search; Enter/Tab finish; Esc clears"},
+		{"Navigation", "up/down, j/k, Tab", "select prompt; cycle scope"},
+		{"Navigation", "Ctrl+A/Ctrl+L/Ctrl+G", "All/Local/Global scope"},
+		{"Search", "/, Backspace", "focus search; edit query"},
+		{"Search", "Enter/Tab, Esc", "finish search; clear query"},
 		{"Prompt Actions", "a, e, d, m", "create, edit, duplicate, " + strings.ToLower(model.moveActionLabel())},
 		{"Prompt Actions", "Alt+D, Enter", "delete with confirmation; insert"},
 		{"Preview", "PgUp/PgDn, Ctrl+U/Ctrl+D", "scroll; Home/End jump"},
 		{"Editor", "Tab, Shift+Tab, Ctrl+S, Esc", "fields; save; cancel"},
+		{"Editor", "arrows/Space", "destination in create/duplicate"},
 	}
 	lines := []string{titleStyle.Render("Keyboard shortcuts"), helpStyle.Render("Press ? or Esc to close"), ""}
 	lastTitle := ""

@@ -1030,7 +1030,7 @@ func TestHotkeyDialogIsResponsiveAccurateAndStatePreserving(t *testing.T) {
 			model.query = "keep"
 			model = update(t, model, key("?"))
 			view := ansiEscape.ReplaceAllString(model.View().Content, "")
-			for _, text := range []string{"Keyboard shortcuts", "Navigation", "Search", "Prompt Actions", "Preview", "Editor", "Alt+D", "move to global"} {
+			for _, text := range []string{"Keyboard shortcuts", "Navigation", "Search", "Prompt Actions", "Preview", "Editor", "Alt+D", "move to global", "Ctrl+A/Ctrl+L/Ctrl+G", "Backspace", "arrows/Space", "destination in create/duplicate"} {
 				if !strings.Contains(strings.ToLower(view), strings.ToLower(text)) {
 					t.Errorf("shortcut dialog missing %q:\n%s", text, view)
 				}
@@ -1057,6 +1057,42 @@ func TestHotkeyDialogIsResponsiveAccurateAndStatePreserving(t *testing.T) {
 				t.Fatalf("help changed form state: open=%v form=%#v", model.helpOpen, model.form)
 			}
 		})
+	}
+}
+
+func TestDuplicateConfirmationIgnoresPaste(t *testing.T) {
+	prompt := config.Prompt{Name: "Original", Contents: "original body", Source: config.SourceProject, Path: "/original.md"}
+	model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
+	model = update(t, model, key("d"))
+	model.form.title.SetValue("Copy title")
+	model.form.body.SetValue("copy body")
+	model.focusForm(0)
+	model = update(t, model, key("ctrl+s"))
+
+	model = update(t, model, tea.PasteMsg{Content: "hidden mutation"})
+	if model.confirmation == nil || model.form.title.Value() != "Copy title" || model.form.body.Value() != "copy body" {
+		t.Fatalf("paste changed duplicate confirmation state: confirmation=%#v form=%#v", model.confirmation, model.form)
+	}
+}
+
+func TestHelpOverDuplicateConfirmationIgnoresPasteAndPreservesModalState(t *testing.T) {
+	prompt := config.Prompt{Name: "Original", Contents: "original body", Source: config.SourceProject, Path: "/original.md"}
+	model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
+	model = update(t, model, key("d"))
+	model.form.title.SetValue("Copy title")
+	model.form.body.SetValue("copy body")
+	model.focusForm(0)
+	model = update(t, model, key("ctrl+s"))
+	confirmation := model.confirmation
+
+	model = update(t, model, key("?"))
+	if !model.helpOpen {
+		t.Fatal("? did not open help from duplicate confirmation with retained title focus")
+	}
+	model = update(t, model, tea.PasteMsg{Content: "hidden mutation"})
+	model = update(t, model, key("esc"))
+	if model.helpOpen || model.confirmation != confirmation || model.form == nil || model.form.title.Value() != "Copy title" || model.form.body.Value() != "copy body" {
+		t.Fatalf("help changed duplicate modal state: help=%v confirmation=%#v form=%#v", model.helpOpen, model.confirmation, model.form)
 	}
 }
 

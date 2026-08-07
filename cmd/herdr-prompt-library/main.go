@@ -92,7 +92,7 @@ func open(getenv func(string) string, client herdr.Client) error {
 		return errors.New("open prompt library: no project root in plugin context")
 	}
 
-	return client.OpenPicker(context.FocusedPaneID, projectRoot, contextJSON)
+	return client.OpenPicker(context.FocusedPaneID, projectRoot)
 }
 
 func main() {
