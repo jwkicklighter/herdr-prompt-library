@@ -23,8 +23,11 @@ import (
 
 const (
 	wideLayoutMinimum = 90
+	outerPadding      = 1
+	pickerPanelGap    = outerPadding
 	panelGap          = 2
-	chromeHeight      = 4
+	panelInnerPadding = 1
+	chromeHeight      = 6
 	minimumPanelSize  = 3
 	searchCursor      = "▏"
 )
@@ -739,7 +742,7 @@ func (model Model) View() tea.View {
 		listPanel := titledPanel("Prompts", model.list.View(), model.list.Width())
 		previewPanel := model.previewPanel()
 		if model.wide {
-			body = lipgloss.JoinHorizontal(lipgloss.Top, listPanel, strings.Repeat(" ", panelGap), previewPanel)
+			body = lipgloss.JoinHorizontal(lipgloss.Top, listPanel, strings.Repeat(" ", pickerPanelGap), previewPanel)
 		} else {
 			body = lipgloss.JoinVertical(lipgloss.Left, listPanel, previewPanel)
 		}
@@ -766,14 +769,18 @@ func (model Model) View() tea.View {
 		// leaves room for every field in short panes.
 		footer = ""
 	}
-	header := titleStyle.Render("Prompt Library") + "  " + model.scopeTabs()
+	header := pickerTitleStyle.Render("Prompt Library") + "  " + model.scopeTabs()
 	search := helpStyle.Render("Search: ") + model.query
 	if model.searchFocused {
 		search += searchCursorStyle.Render(searchCursor)
 	} else if model.query == "" {
 		search += helpStyle.Render("/ to filter")
 	}
-	viewContents := header + "\n" + search + "\n" + body
+	separator := "\n"
+	if model.form == nil && !model.helpOpen && model.confirmation == nil {
+		separator = "\n\n"
+	}
+	viewContents := header + separator + search + separator + body
 	if footer != "" {
 		viewContents += "\n" + footer
 	}
@@ -785,15 +792,15 @@ func (model Model) View() tea.View {
 func (model *Model) resize(width, height int) {
 	model.width = max(1, width-outerStyle.GetHorizontalFrameSize())
 	model.height = max(1, height-outerStyle.GetVerticalFrameSize())
-	model.wide = model.width >= wideLayoutMinimum
+	model.wide = width >= wideLayoutMinimum
 	if model.form != nil {
 		model.sizeForm()
 	}
 
 	bodyHeight := max(minimumPanelSize, model.height-chromeHeight)
 	if model.wide {
-		listWidth := max(30, (model.width-panelGap)*2/5)
-		previewWidth := max(minimumPanelSize, model.width-panelGap-listWidth)
+		listWidth := max(30, (model.width-pickerPanelGap)*2/5)
+		previewWidth := max(minimumPanelSize, model.width-pickerPanelGap-listWidth)
 		model.setListSize(listWidth, bodyHeight)
 		model.setPreviewSize(previewWidth, bodyHeight)
 		return
@@ -809,12 +816,12 @@ func (model *Model) resize(width, height int) {
 }
 
 func (model *Model) setListSize(panelWidth, panelHeight int) {
-	model.list.SetSize(max(1, panelWidth-panelStyle.GetHorizontalFrameSize()), max(1, panelHeight-panelStyle.GetVerticalFrameSize()))
+	model.list.SetSize(panelContentWidth(panelWidth), max(1, panelHeight-panelStyle.GetVerticalFrameSize()-panelInnerPadding))
 }
 
 func (model *Model) setPreviewSize(panelWidth, panelHeight int) {
-	innerWidth := max(1, panelWidth-panelStyle.GetHorizontalFrameSize())
-	innerHeight := max(1, panelHeight-panelStyle.GetVerticalFrameSize())
+	innerWidth := panelContentWidth(panelWidth)
+	innerHeight := max(1, panelHeight-panelStyle.GetVerticalFrameSize()-panelInnerPadding)
 	model.preview.SetWidth(innerWidth)
 	model.preview.SetHeight(innerHeight)
 	model.refreshPreview()
@@ -1097,7 +1104,6 @@ func (model Model) scopeTabs() string {
 		label := scope.String()
 		if scope == model.scope {
 			style = activeScopeStyle
-			label = "[" + label + "]"
 		}
 		parts = append(parts, style.Render(label))
 	}
@@ -1133,19 +1139,26 @@ func footerGroups(groups []footerGroup) string {
 
 func titledPanel(title, contents string, innerWidth int) string {
 	innerWidth = max(1, innerWidth)
+	panelInnerWidth := innerWidth + panelInnerPadding*2
 	label := " " + title + " "
-	label = ansi.Cut(label, 0, max(1, innerWidth-1))
-	topFill := max(0, innerWidth-ansi.StringWidth(label)-1)
+	label = ansi.Cut(label, 0, max(1, panelInnerWidth-1))
+	topFill := max(0, panelInnerWidth-ansi.StringWidth(label)-1)
 	top := formFieldBorderStyle.Render("╭─") + previewTitleStyle.Render(label) + formFieldBorderStyle.Render(strings.Repeat("─", topFill)+"╮")
 
-	rows := strings.Split(contents, "\n")
+	rows := append([]string{strings.Repeat(" ", panelInnerWidth)}, strings.Split(contents, "\n")...)
 	for index, row := range rows {
-		row = ansi.Cut(row, 0, innerWidth)
-		row += strings.Repeat(" ", max(0, innerWidth-ansi.StringWidth(row)))
+		if index > 0 {
+			row = strings.Repeat(" ", panelInnerPadding) + ansi.Cut(row, 0, innerWidth)
+		}
+		row += strings.Repeat(" ", max(0, panelInnerWidth-ansi.StringWidth(row)))
 		rows[index] = formFieldBorderStyle.Render("│") + row + formFieldBorderStyle.Render("│")
 	}
-	bottom := formFieldBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	bottom := formFieldBorderStyle.Render("╰" + strings.Repeat("─", panelInnerWidth) + "╯")
 	return top + "\n" + strings.Join(rows, "\n") + "\n" + bottom
+}
+
+func panelContentWidth(panelWidth int) int {
+	return max(1, panelWidth-panelStyle.GetHorizontalFrameSize()-panelInnerPadding*2)
 }
 
 func (model Model) statePanel(contents string) string {
@@ -1183,7 +1196,7 @@ func (model Model) formPanel() string {
 	contents := strings.Join(lines, "\n")
 	if model.wide {
 		sidebarOuterWidth := max(18, model.formWidth()-fieldWidth-panelGap)
-		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("None exposed by Herdr 0.8.0."), max(1, sidebarOuterWidth-2))
+		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("None exposed by Herdr 0.8.0."), panelContentWidth(sidebarOuterWidth))
 		contents = lipgloss.JoinHorizontal(lipgloss.Top, contents, strings.Repeat(" ", panelGap), sidebar)
 	}
 	return panelStyle.Render(contents)

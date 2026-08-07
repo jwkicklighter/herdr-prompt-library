@@ -411,6 +411,91 @@ func TestPickerChromeUsesTitledBordersEvenPaddingAndBounds(t *testing.T) {
 	}
 }
 
+func TestPickerHierarchyAndPanelGeometryAcrossResponsiveWidths(t *testing.T) {
+	tests := []struct {
+		name  string
+		width int
+		wide  bool
+	}{
+		{name: "narrow", width: 60},
+		{name: "threshold", width: 90, wide: true},
+		{name: "wide", width: 120, wide: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const height = 30
+			model := update(t, New(testPrompts()), tea.WindowSizeMsg{Width: test.width, Height: height})
+			if model.wide != test.wide {
+				t.Fatalf("wide = %v at %d columns, want %v", model.wide, test.width, test.wide)
+			}
+
+			view := ansiEscape.ReplaceAllString(model.View().Content, "")
+			lines := strings.Split(view, "\n")
+			if len(lines) > height {
+				t.Fatalf("view height = %d, terminal height = %d", len(lines), height)
+			}
+			for _, line := range lines {
+				if got := lipgloss.Width(line); got > test.width {
+					t.Fatalf("line width = %d, terminal width = %d: %q", got, test.width, line)
+				}
+			}
+
+			titleRow := rowContaining(t, lines, "Prompt Library")
+			searchRow := rowContaining(t, lines, "Search:")
+			promptsRow := rowContaining(t, lines, "╭─ Prompts ")
+			previewRow := rowContaining(t, lines, "╭─ Preview ")
+			if searchRow-titleRow != 2 || promptsRow-searchRow != 2 {
+				t.Fatalf("hierarchy rows title=%d search=%d panels=%d, want one blank row between each", titleRow, searchRow, promptsRow)
+			}
+
+			promptLeft, promptRight := panelColumns(t, lines[promptsRow], 0)
+			if promptLeft != outerPadding {
+				t.Fatalf("prompt panel left = %d, outer padding = %d", promptLeft, outerPadding)
+			}
+			assertPanelInsets(t, lines, promptsRow, promptLeft, promptRight)
+
+			if test.wide {
+				if previewRow != promptsRow {
+					t.Fatalf("wide panel tops differ: prompts=%d preview=%d", promptsRow, previewRow)
+				}
+				previewLeft, previewRight := panelColumns(t, lines[previewRow], 1)
+				if gap := previewLeft - promptRight - 1; gap != outerPadding {
+					t.Fatalf("inter-panel gap = %d, outer padding = %d", gap, outerPadding)
+				}
+				assertPanelInsets(t, lines, previewRow, previewLeft, previewRight)
+				if previewRight != test.width-outerPadding-1 {
+					t.Fatalf("preview panel right = %d, want %d", previewRight, test.width-outerPadding-1)
+				}
+			} else {
+				if previewRow <= promptsRow {
+					t.Fatalf("narrow preview row = %d, prompts row = %d", previewRow, promptsRow)
+				}
+				previewLeft, previewRight := panelColumns(t, lines[previewRow], 0)
+				assertPanelInsets(t, lines, previewRow, previewLeft, previewRight)
+				if previewLeft != outerPadding || previewRight != test.width-outerPadding-1 {
+					t.Fatalf("narrow preview bounds = %d..%d", previewLeft, previewRight)
+				}
+			}
+		})
+	}
+}
+
+func TestPickerHierarchyStylesUseInheritedPalette(t *testing.T) {
+	if !pickerTitleStyle.GetBold() || !pickerTitleStyle.GetUnderline() || pickerTitleStyle.GetForeground() != accentColor {
+		t.Fatalf("picker title style is not prominent inherited cyan: %#v", pickerTitleStyle)
+	}
+	if activeScopeStyle.GetBackground() != accentColor || activeScopeStyle.GetForeground() != lipgloss.Color("0") {
+		t.Fatalf("active scope is not a solid accent rectangle: %#v", activeScopeStyle)
+	}
+	if got := ansiEscape.ReplaceAllString(New(nil).scopeTabs(), ""); strings.ContainsAny(got, "[]") {
+		t.Fatalf("scope tabs retain bracket selection: %q", got)
+	}
+	if itemDescriptionStyle.GetForeground() != excerptColor || excerptColor != lipgloss.Color("8") || excerptColor == mutedColor {
+		t.Fatalf("excerpt color = %q, muted = %q; want distinct ANSI dark gray", itemDescriptionStyle.GetForeground(), mutedColor)
+	}
+}
+
 func TestFooterGroupsUseThemeColorsAndSpacing(t *testing.T) {
 	if accentColor != lipgloss.Color("6") || mutedColor != lipgloss.Color("7") {
 		t.Fatalf("theme colors = accent %q muted %q, want ANSI cyan and gray", accentColor, mutedColor)
@@ -419,6 +504,56 @@ func TestFooterGroupsUseThemeColorsAndSpacing(t *testing.T) {
 	want := titleStyle.Render("enter") + " " + helpStyle.Render("insert") + "    " + titleStyle.Render("esc") + " " + helpStyle.Render("close")
 	if got != want {
 		t.Fatalf("footer = %q, want %q", got, want)
+	}
+}
+
+func rowContaining(t *testing.T, lines []string, value string) int {
+	t.Helper()
+	for index, line := range lines {
+		if strings.Contains(line, value) {
+			return index
+		}
+	}
+	t.Fatalf("view does not contain %q", value)
+	return -1
+}
+
+func panelColumns(t *testing.T, line string, occurrence int) (int, int) {
+	t.Helper()
+	runes := []rune(line)
+	left, right := -1, -1
+	seen := 0
+	for index, character := range runes {
+		if character == '╭' {
+			if seen == occurrence {
+				left = index
+			}
+			seen++
+		}
+		if left >= 0 && character == '╮' {
+			right = index
+			break
+		}
+	}
+	if left < 0 || right < 0 {
+		t.Fatalf("panel %d not found in %q", occurrence, line)
+	}
+	return left, right
+}
+
+func assertPanelInsets(t *testing.T, lines []string, top, left, right int) {
+	t.Helper()
+	blank := []rune(lines[top+1])[left+1 : right]
+	if strings.TrimSpace(string(blank)) != "" {
+		t.Fatalf("panel top inset row is not blank: %q", string(blank))
+	}
+	content := []rune(lines[top+2])[left+1 : right]
+	first := 0
+	for first < len(content) && content[first] == ' ' {
+		first++
+	}
+	if first != panelInnerPadding {
+		t.Fatalf("panel horizontal inset = %d, top inset = %d", first, panelInnerPadding)
 	}
 }
 

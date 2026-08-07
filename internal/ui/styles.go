@@ -6,15 +6,17 @@ var (
 	// Herdr forwards its active terminal palette to pane applications. Using
 	// ANSI cyan and gray keeps the picker aligned with that palette instead of
 	// pinning it to fixed 256-color values.
-	accentColor = lipgloss.Color("6")
-	mutedColor  = lipgloss.Color("7")
+	accentColor  = lipgloss.Color("6")
+	mutedColor   = lipgloss.Color("7")
+	excerptColor = lipgloss.Color("8")
 
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accentColor)
-	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(mutedColor)
+	pickerTitleStyle = titleStyle.Underline(true)
+	panelStyle       = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(mutedColor)
 	formFieldBorderStyle = lipgloss.NewStyle().
 				Foreground(mutedColor)
 	focusedFormFieldBorderStyle = lipgloss.NewStyle().
@@ -39,7 +41,7 @@ var (
 	selectedItemNameStyle = itemNameStyle.
 				Foreground(accentColor)
 	itemDescriptionStyle = lipgloss.NewStyle().
-				Foreground(mutedColor)
+				Foreground(excerptColor)
 	localBadgeStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accentColor)
@@ -51,9 +53,10 @@ var (
 			Padding(0, 1)
 	activeScopeStyle = scopeStyle.
 				Bold(true).
-				Foreground(accentColor)
+				Foreground(lipgloss.Color("0")).
+				Background(accentColor)
 	errorStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("1"))
-	outerStyle = lipgloss.NewStyle().Padding(1)
+	outerStyle = lipgloss.NewStyle().Padding(outerPadding)
 )
