@@ -90,19 +90,19 @@ The picker has three source views:
 
 The picker provides `All`, `Local`, and `Global` views; the default is `All`. Switching views never changes files. Each entry shows its title, optional description, and `LOCAL` or `GLOBAL` source badge. Duplicate titles remain separate entries.
 
-Ordinary typing always enters the fuzzy search. Search matches the title, description, and body. Matching is case-insensitive; clearing the query restores the active view. Search never edits prompt contents. `Enter` immediately inserts the selected result; it does not open a separate selection step.
+Search starts unfocused so navigation and action shortcuts are immediately available. Press `/` to focus it and show the text cursor. Search matches the title, description, and body and is case-insensitive. While search is focused, `Esc` clears the query and returns focus to the picker; `Enter` or `Tab` keeps the query and returns focus without inserting a prompt or changing scope. With search unfocused, `Enter` inserts the selected result.
 
 ## Managing prompts
 
 Management actions open in-popup forms or confirmations. They operate on the selected entry and use the active source/location unless stated otherwise:
 
-- `Alt+A`: create a prompt
-- `Alt+E`: edit the selected prompt
+- `a`: create a prompt
+- `e`: edit the selected prompt
 - `Alt+D`: delete the selected prompt after an in-popup confirmation
-- `Alt+U`: duplicate the selected prompt in a prefilled form
-- `Alt+M`: move the selected prompt directly to the opposite scope after an in-popup confirmation
+- `d`: duplicate the selected prompt in a prefilled form, followed by a final confirmation
+- `m`: move the selected prompt directly to the opposite scope after an in-popup confirmation
 
-Create and duplicate forms contain title, description, multiline body, and destination fields. Move has no destination picker: it goes directly from local to global or global to local. Filenames are generated from the title as slugs; when a slug already exists, a collision suffix is generated rather than replacing the existing file. Editing preserves the selected prompt's filename. Delete and move never affect a different prompt with the same title.
+Create and duplicate forms contain title, description, multiline body, and destination fields. Duplicate shows the source title, proposed copy title, and destination for confirmation before writing; a failed write keeps the entered values available for correction and retry. Move has no destination picker: its label and confirmation identify the opposite scope, local to global or global to local. Filenames are generated from the title as slugs; when a slug already exists, a collision suffix is generated rather than replacing the existing file. Editing preserves the selected prompt's filename. Delete and move never affect a different prompt with the same title.
 
 `Ctrl+S` saves the active form. `Tab` moves between form fields and `Esc` cancels the form or confirmation without inserting or changing files. Saved changes are picked up the next time the library is refreshed or reopened. Insertion sends only the selected Markdown body to the original pane and does not modify the prompt file.
 
@@ -119,16 +119,20 @@ Prompt titles are display metadata, not filenames or keys. Two files may have th
 - `up`/`down` or `j`/`k`: move through prompts
 - `pgup`/`pgdown` or `ctrl+u`/`ctrl+d`: scroll the preview
 - `home`/`end`: jump to the top or bottom of the preview
-- ordinary typing: fuzzy-search titles, descriptions, and bodies
-- `enter`: immediately insert the selected prompt into the pane that was focused before the popup opened
-- `Alt+A`: create form
-- `Alt+E`: edit form
+- `/`: focus fuzzy search; type to filter titles, descriptions, and bodies
+- `enter`/`Tab` while searching: keep the query and return focus to picker controls
+- `esc` while searching: clear the query and return focus to picker controls
+- `enter` while search is unfocused: insert the selected prompt into the pane that was focused before the popup opened
+- `a`: create form
+- `e`: edit form
 - `Alt+D`: delete confirmation
-- `Alt+U`: duplicate form
-- `Alt+M`: move confirmation to the opposite scope
+- `d`: duplicate form and final confirmation
+- `m`: move confirmation to the opposite scope
+- `?`: show or close the context-aware keyboard shortcut dialog outside text entry
 - `Tab`: move to the next form field
 - `Ctrl+S`: save the active form
-- `esc`: cancel the active form, confirmation, or picker without inserting
+- `enter`/`y`: accept a confirmation
+- `esc`/`n`: cancel a form or confirmation; `esc` closes the unfocused picker without inserting
 
 The popup resizes with Herdr. On wide terminals, the prompt list and preview are side by side; on narrower terminals, they stack vertically. Closing the popup returns focus to the pane that opened it.
 

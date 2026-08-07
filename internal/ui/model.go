@@ -26,6 +26,7 @@ const (
 	panelGap          = 2
 	chromeHeight      = 4
 	minimumPanelSize  = 3
+	searchCursor      = "▏"
 )
 
 // SelectionMsg requests insertion of the selected prompt. The complete prompt
@@ -78,6 +79,7 @@ type confirmationKind int
 const (
 	deleteConfirmation confirmationKind = iota + 1
 	moveConfirmation
+	duplicateConfirmation
 )
 
 type confirmation struct {
@@ -150,6 +152,8 @@ type Model struct {
 	prompts        []config.Prompt
 	scope          libraryScope
 	query          string
+	searchFocused  bool
+	helpOpen       bool
 	scopeSelection map[libraryScope]config.Prompt
 	configErr      error
 	width          int
@@ -255,11 +259,21 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.selected = &prompt
 		return model, tea.Quit
 	case tea.KeyPressMsg:
-		if model.form != nil {
-			return model.updateForm(message)
+		if model.helpOpen {
+			if message.String() == "?" || message.String() == "esc" {
+				model.helpOpen = false
+			}
+			return model, nil
+		}
+		if message.String() == "?" && !model.searchFocused && (model.form == nil || model.form.focus == 3) {
+			model.helpOpen = true
+			return model, nil
 		}
 		if model.confirmation != nil {
 			return model.updateConfirmation(message)
+		}
+		if model.form != nil {
+			return model.updateForm(message)
 		}
 		if model.operationErr != nil {
 			if message.String() == "esc" {
@@ -267,13 +281,35 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return model, nil
 		}
-		switch message.String() {
-		case "esc":
-			if model.query != "" {
+		if model.searchFocused {
+			switch message.String() {
+			case "esc":
 				model.query = ""
+				model.searchFocused = false
 				model.refreshItems(model.currentPrompt(), true)
 				return model, nil
+			case "enter", "tab":
+				model.searchFocused = false
+				return model, nil
+			case "ctrl+c":
+				model.cancelled = true
+				return model, tea.Quit
+			case "backspace":
+				if model.query != "" {
+					_, size := utf8.DecodeLastRuneInString(model.query)
+					model.query = model.query[:len(model.query)-size]
+					model.refreshItems(model.currentPrompt(), true)
+				}
+				return model, nil
 			}
+			if message.Text != "" {
+				model.query += message.Text
+				model.refreshItems(model.currentPrompt(), true)
+			}
+			return model, nil
+		}
+		switch message.String() {
+		case "esc":
 			model.cancelled = true
 			return model, tea.Quit
 		case "ctrl+c":
@@ -291,12 +327,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+g":
 			model.setScope(globalScope)
 			return model, nil
-		case "backspace":
-			if model.query != "" {
-				_, size := utf8.DecodeLastRuneInString(model.query)
-				model.query = model.query[:len(model.query)-size]
-				model.refreshItems(model.currentPrompt(), true)
-			}
+		case "/":
+			model.searchFocused = true
 			return model, nil
 		case "enter":
 			if item, ok := model.list.SelectedItem().(promptItem); ok && (model.configErr == nil || len(model.prompts) > 0) {
@@ -304,13 +336,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return model, func() tea.Msg { return SelectionMsg{Prompt: prompt} }
 			}
 			return model, nil
-		case "alt+a":
+		case "a":
 			if model.libraries != nil {
 				model.openForm(createForm, config.Prompt{})
 				return model, nil
 			}
 			break
-		case "alt+e":
+		case "e":
 			if model.libraries != nil {
 				if prompt := model.currentPrompt(); prompt.Path != "" {
 					model.openForm(editForm, prompt)
@@ -327,7 +359,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return model, nil
 			}
 			break
-		case "alt+u":
+		case "d":
 			if model.libraries != nil {
 				if prompt := model.currentPrompt(); prompt.Path != "" {
 					model.openForm(duplicateForm, prompt)
@@ -335,7 +367,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return model, nil
 			}
 			break
-		case "alt+m":
+		case "m":
 			if model.libraries != nil {
 				if prompt := model.currentPrompt(); prompt.Path != "" {
 					model.confirmation = &confirmation{kind: moveConfirmation, prompt: prompt}
@@ -373,14 +405,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.preview.GotoBottom()
 			return model, nil
 		}
-		if message.Text != "" {
-			model.query += message.Text
-			model.refreshItems(model.currentPrompt(), true)
-			return model, nil
-		}
 	case tea.PasteMsg:
 		if model.form != nil {
 			return model.updateForm(message)
+		}
+		if model.searchFocused && message.Content != "" {
+			model.query += message.Content
+			model.refreshItems(model.currentPrompt(), true)
+			return model, nil
 		}
 	}
 
@@ -511,6 +543,11 @@ func (model Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
 
 func (model *Model) saveForm() {
 	form := model.form
+	if form.mode == duplicateForm {
+		form.err = nil
+		model.confirmation = &confirmation{kind: duplicateConfirmation, prompt: form.original}
+		return
+	}
 	changes := config.Prompt{
 		Name:        form.title.Value(),
 		Description: form.description.Value(),
@@ -522,8 +559,6 @@ func (model *Model) saveForm() {
 	)
 	if form.mode == editForm {
 		saved, err = model.libraries.Update(form.original, changes)
-	} else if form.mode == duplicateForm {
-		saved, err = model.libraries.Duplicate(form.original, form.destination, changes)
 	} else {
 		saved, err = model.libraries.Create(form.destination, changes)
 	}
@@ -564,11 +599,31 @@ func (model Model) updateConfirmation(message tea.KeyPressMsg) (tea.Model, tea.C
 	case "enter", "y":
 		if confirmation.kind == deleteConfirmation {
 			model.confirmDelete()
-		} else {
+		} else if confirmation.kind == moveConfirmation {
 			model.confirmMove()
+		} else {
+			model.confirmDuplicate()
 		}
 	}
 	return model, nil
+}
+
+func (model *Model) confirmDuplicate() {
+	form := model.form
+	changes := config.Prompt{
+		Name:        form.title.Value(),
+		Description: form.description.Value(),
+		Contents:    form.body.Value(),
+	}
+	duplicated, err := model.libraries.Duplicate(form.original, form.destination, changes)
+	if err != nil {
+		model.confirmation.err = err
+		return
+	}
+	model.prompts = append(model.prompts, duplicated)
+	model.confirmation = nil
+	model.form = nil
+	model.revealPrompt(duplicated)
 }
 
 func (model *Model) confirmDelete() {
@@ -651,10 +706,12 @@ func otherSource(source string) string {
 func (model Model) View() tea.View {
 	var body string
 	switch {
-	case model.form != nil:
-		body = model.formPanel()
+	case model.helpOpen:
+		body = model.hotkeyPanel()
 	case model.confirmation != nil:
 		body = model.confirmationPanel()
+	case model.form != nil:
+		body = model.formPanel()
 	case model.configErr != nil && len(model.prompts) == 0:
 		body = model.statePanel(errorStyle.Render("Could not load prompts") + "\n\n" + model.configErr.Error() + "\n\nFix the malformed Markdown prompt, then reopen the picker.")
 	case len(model.list.Items()) == 0:
@@ -678,22 +735,24 @@ func (model Model) View() tea.View {
 		body = model.statePanel(errorStyle.Render("Could not insert prompt")+"\n\n"+model.insertErr.Error()+"\n\nCheck that Herdr is running and the target pane still exists, then press Enter to retry.") + "\n" + body
 	}
 
-	help := "type search | up/down navigate | tab scope | ctrl+a/ctrl+l/ctrl+g | enter select | esc clear/close"
+	help := "/ search | up/down navigate | tab scope | ? shortcuts | enter select | esc close"
 	if model.libraries != nil {
-		help = "type search | alt+a add | alt+e edit | alt+d delete | alt+u duplicate | alt+m move | enter insert"
+		help = "/ search | a add | e edit | d duplicate | m " + strings.ToLower(model.moveActionLabel()) + " | alt+d delete | ? help"
 	} else if !model.wide {
-		help = "type search | arrows move | tab scope | ^a/^l/^g | enter select | esc clear/close"
+		help = "/ search | arrows move | tab scope | ^a/^l/^g | ? help | enter select"
 	}
 	footer := helpStyle.Render(lipgloss.Wrap(help, max(1, model.width), ""))
-	if model.form != nil {
+	if model.form != nil || model.helpOpen {
 		// The form includes its own shortcut help; omitting the global footer
 		// leaves room for every field in short panes.
 		footer = ""
 	}
 	header := titleStyle.Render("Prompt Library") + "  " + model.scopeTabs()
 	search := helpStyle.Render("Search: ") + model.query
-	if model.query == "" {
-		search += helpStyle.Render("type to filter")
+	if model.searchFocused {
+		search += searchCursorStyle.Render(searchCursor)
+	} else if model.query == "" {
+		search += helpStyle.Render("/ to filter")
 	}
 	viewContents := header + "\n" + search + "\n" + body
 	if footer != "" {
@@ -1011,7 +1070,7 @@ func (model Model) scopeTabs() string {
 
 func (model Model) emptyState() string {
 	if model.query != "" {
-		return fmt.Sprintf("No prompts match %q in %s.\n\nPress Backspace to edit the search, Esc to clear it, or Tab to try another scope.", model.query, model.scope.String())
+		return fmt.Sprintf("No prompts match %q in %s.\n\nPress / to edit the search, Esc while searching to clear it, or Tab to try another scope.", model.query, model.scope.String())
 	}
 	if len(model.prompts) == 0 {
 		return "No prompts found.\n\nAdd prompts to the local or global library, then reopen the picker."
@@ -1120,9 +1179,48 @@ func (model Model) confirmationPanel() string {
 		}
 		heading = "Move prompt?"
 		detail += "\nDestination: " + destination
+	} else if confirmation.kind == duplicateConfirmation {
+		destination := "Local"
+		if model.form.destination == config.SourceGlobal {
+			destination = "Global"
+		}
+		heading = "Duplicate prompt?"
+		detail = fmt.Sprintf("Source title: %s\nCopy title: %s\nDestination: %s", prompt.Name, model.form.title.Value(), destination)
 	}
 	if confirmation.err != nil {
 		detail += "\n\n" + errorStyle.Render("Operation failed: ") + confirmation.err.Error()
 	}
 	return model.statePanel(titleStyle.Render(heading) + "\n\n" + detail + "\n\nEnter/y confirm | Esc/n cancel")
+}
+
+func (model Model) moveActionLabel() string {
+	if model.currentPrompt().Source == config.SourceGlobal {
+		return "Move to Local"
+	}
+	return "Move to Global"
+}
+
+func (model Model) hotkeyPanel() string {
+	sections := []struct {
+		title  string
+		keys   string
+		action string
+	}{
+		{"Navigation", "up/down, j/k", "select prompt; Tab changes scope"},
+		{"Search", "/", "focus search; Enter/Tab finish; Esc clears"},
+		{"Prompt Actions", "a, e, d, m", "create, edit, duplicate, " + strings.ToLower(model.moveActionLabel())},
+		{"Prompt Actions", "Alt+D, Enter", "delete with confirmation; insert"},
+		{"Preview", "PgUp/PgDn, Ctrl+U/Ctrl+D", "scroll; Home/End jump"},
+		{"Editor", "Tab, Shift+Tab, Ctrl+S, Esc", "fields; save; cancel"},
+	}
+	lines := []string{titleStyle.Render("Keyboard shortcuts"), helpStyle.Render("Press ? or Esc to close"), ""}
+	lastTitle := ""
+	for _, section := range sections {
+		if section.title != lastTitle {
+			lines = append(lines, titleStyle.Render(section.title))
+			lastTitle = section.title
+		}
+		lines = append(lines, shortcutKeyStyle.Render(section.keys)+"  "+shortcutActionStyle.Render(section.action))
+	}
+	return model.statePanel(strings.Join(lines, "\n"))
 }

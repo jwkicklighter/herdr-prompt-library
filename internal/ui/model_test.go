@@ -124,6 +124,7 @@ func TestWeightedFuzzySearchRanksFieldsAndShowsBodyExcerpt(t *testing.T) {
 		{Name: "Deploy production", Description: "Title match", Contents: "unrelated", Source: config.SourceProject},
 	}, nil)
 	model = update(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	model = update(t, model, key("/"))
 	for _, input := range []string{"d", "p", "l"} {
 		model = update(t, model, key(input))
 	}
@@ -150,6 +151,7 @@ func TestDescriptionlessPromptRendersAndSearchesByTitleAndBody(t *testing.T) {
 	if view := model.View().Content; !strings.Contains(view, "Deploy helper") {
 		t.Fatalf("descriptionless prompt missing from list: %q", view)
 	}
+	model = update(t, model, key("/"))
 	for _, input := range []string{"p", "r", "o", "d"} {
 		model = update(t, model, key(input))
 	}
@@ -160,6 +162,7 @@ func TestDescriptionlessPromptRendersAndSearchesByTitleAndBody(t *testing.T) {
 
 func TestEscapeClearsQueryBeforeClosing(t *testing.T) {
 	model := newTestModel(t)
+	model = update(t, model, key("/"))
 	model = update(t, model, key("g"))
 	if model.query != "g" || len(model.list.Items()) != 1 {
 		t.Fatalf("search state = %q, %d items", model.query, len(model.list.Items()))
@@ -176,15 +179,39 @@ func TestEscapeClearsQueryBeforeClosing(t *testing.T) {
 	}
 }
 
+func TestSearchStartsUnfocusedAndExitKeysPreserveExpectedState(t *testing.T) {
+	for _, exit := range []string{"enter", "tab"} {
+		t.Run(exit, func(t *testing.T) {
+			model := newTestModel(t)
+			initialScope := model.scope
+			if model.searchFocused || strings.Contains(model.View().Content, searchCursor) {
+				t.Fatal("search started focused or rendered a cursor")
+			}
+			model = update(t, model, key("/"))
+			if !model.searchFocused || !strings.Contains(model.View().Content, searchCursor) {
+				t.Fatal("/ did not focus search with a visible cursor")
+			}
+			model = update(t, model, key("g"))
+			updated, command := model.Update(key(exit))
+			model = updated.(Model)
+			if command != nil || model.searchFocused || model.query != "g" || model.scope != initialScope {
+				t.Fatalf("%s exit: command=%v focused=%v query=%q scope=%s", exit, command != nil, model.searchFocused, model.query, model.scope)
+			}
+		})
+	}
+}
+
 func TestFilteredNavigationPreviewAndInsertionUseExactPrompt(t *testing.T) {
 	model := New([]config.Prompt{
 		{Name: "Local deploy", Description: "deploy", Contents: "local body", Source: config.SourceProject},
 		{Name: "Global deploy", Description: "deploy", Contents: "global body", Source: config.SourceGlobal},
 		{Name: "Other", Description: "other", Contents: "other body", Source: config.SourceGlobal},
 	}, nil)
+	model = update(t, model, key("/"))
 	for _, input := range []string{"d", "p", "l"} {
 		model = update(t, model, key(input))
 	}
+	model = update(t, model, key("enter"))
 	model = update(t, model, key("down"))
 	if got := model.preview.GetContent(); got != "global body" {
 		t.Fatalf("filtered preview = %q, want global body", got)
@@ -231,12 +258,14 @@ func TestScopesCycleDirectlyFilterAndRememberSelection(t *testing.T) {
 	if got := model.currentPrompt().Name; got != "Global two" {
 		t.Errorf("remembered global selection = %q", got)
 	}
+	model = update(t, model, key("/"))
 	for _, input := range []string{"s", "h", "a", "r", "e", "d"} {
 		model = update(t, model, key(input))
 	}
 	if len(model.list.Items()) != 1 || model.currentPrompt().Name != "Global two" {
 		t.Fatalf("global query results = %d, selected %q", len(model.list.Items()), model.currentPrompt().Name)
 	}
+	model = update(t, model, key("enter"))
 	model = update(t, model, key("ctrl+a"))
 	if model.scope != allScope || len(model.list.Items()) != 2 {
 		t.Fatalf("all query results = %d in %s", len(model.list.Items()), model.scope)
@@ -359,9 +388,10 @@ func TestEmptyScopeAndNoMatchesExplainRecovery(t *testing.T) {
 		}
 	}
 	model = update(t, model, key("ctrl+a"))
+	model = update(t, model, key("/"))
 	model = update(t, model, key("z"))
 	view = model.View().Content
-	for _, text := range []string{"No prompts match", "Backspace", "Esc", "Tab"} {
+	for _, text := range []string{"No prompts match", "edit the search", "Esc", "Tab"} {
 		if !strings.Contains(view, text) {
 			t.Errorf("no-match view does not contain %q", text)
 		}
@@ -394,7 +424,7 @@ func TestCreatePromptsInBothScopesWithExactBody(t *testing.T) {
 			} else {
 				model.setScope(localScope)
 			}
-			model = update(t, model, key("alt+a"))
+			model = update(t, model, key("a"))
 			if model.form == nil || model.form.destination != source {
 				t.Fatalf("create destination = %#v, want %s", model.form, source)
 			}
@@ -434,9 +464,9 @@ func TestFormBodyAcceptsBracketedPasteInEveryMode(t *testing.T) {
 		shortcut string
 		initial  string
 	}{
-		{name: "create", shortcut: "alt+a"},
-		{name: "edit", shortcut: "alt+e", initial: prompt.Contents},
-		{name: "duplicate", shortcut: "alt+u", initial: prompt.Contents},
+		{name: "create", shortcut: "a"},
+		{name: "edit", shortcut: "e", initial: prompt.Contents},
+		{name: "duplicate", shortcut: "d", initial: prompt.Contents},
 	}
 
 	for _, test := range tests {
@@ -464,7 +494,7 @@ func TestFormBodyAcceptsBracketedPasteInEveryMode(t *testing.T) {
 
 func TestFormTextInputsAcceptBracketedPaste(t *testing.T) {
 	model := NewWithLibraries(nil, fakeLibraries{})
-	model = update(t, model, key("alt+a"))
+	model = update(t, model, key("a"))
 	model = update(t, model, tea.PasteMsg{Content: "ctrl+s"})
 	model = update(t, model, key("x"))
 	if got, want := model.form.title.Value(), "ctrl+sx"; got != want {
@@ -485,7 +515,7 @@ func TestFormTextInputsAcceptBracketedPaste(t *testing.T) {
 func TestFormViewRendersLabeledBorderedFieldsWithSpacing(t *testing.T) {
 	model := NewWithLibraries(nil, fakeLibraries{})
 	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 24})
-	model = update(t, model, key("alt+a"))
+	model = update(t, model, key("a"))
 	view := ansiEscape.ReplaceAllString(model.View().Content, "")
 
 	for _, label := range []string{"Title", "Description", "Body"} {
@@ -502,7 +532,7 @@ func TestFormViewRendersLabeledBorderedFieldsWithSpacing(t *testing.T) {
 func TestFormViewHighlightsFocusedField(t *testing.T) {
 	model := NewWithLibraries(nil, fakeLibraries{})
 	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 24})
-	model = update(t, model, key("alt+a"))
+	model = update(t, model, key("a"))
 	if formField("Title", "", 20, true) == formField("Title", "", 20, false) {
 		t.Fatal("focused field border does not differ from its unfocused state")
 	}
@@ -535,7 +565,7 @@ func TestFormViewFitsSupportedNarrowAndWideSizes(t *testing.T) {
 		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
 			model := NewWithLibraries(nil, fakeLibraries{})
 			model = update(t, model, size)
-			model = update(t, model, key("alt+a"))
+			model = update(t, model, key("a"))
 			view := ansiEscape.ReplaceAllString(model.View().Content, "")
 			for _, line := range strings.Split(view, "\n") {
 				if got := lipgloss.Width(line); got > size.Width {
@@ -559,7 +589,7 @@ func TestCrossScopeCreateRevealsResultAndPreservesMatchingQuery(t *testing.T) {
 	model.setScope(localScope)
 	model.query = "New"
 	model.refreshItems(config.Prompt{}, false)
-	model = update(t, model, key("alt+a"))
+	model = update(t, model, key("a"))
 	model.form.title.SetValue("New global prompt")
 	model.form.description.SetValue("Description")
 	model.form.body.SetValue("new body")
@@ -577,7 +607,7 @@ func TestCrossScopeCreateRevealsResultAndPreservesMatchingQuery(t *testing.T) {
 func TestCreateValidationAndWriteErrorsPreserveForm(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	validationModel := NewWithLibraries(nil, libraries)
-	validationModel = update(t, validationModel, key("alt+a"))
+	validationModel = update(t, validationModel, key("a"))
 	validationModel = update(t, validationModel, key("ctrl+s"))
 	if validationModel.form == nil || validationModel.form.err == nil || !strings.Contains(validationModel.form.err.Error(), "title must not be blank") {
 		t.Fatalf("blank form validation = %#v", validationModel.form)
@@ -588,7 +618,7 @@ func TestCreateValidationAndWriteErrorsPreserveForm(t *testing.T) {
 		return config.Prompt{}, wantErr
 	}}
 	model := NewWithLibraries(nil, storage)
-	model = update(t, model, key("alt+a"))
+	model = update(t, model, key("a"))
 	model.form.title.SetValue("Keep title")
 	model.form.description.SetValue("Keep description")
 	model.form.body.SetValue("Keep\nbody")
@@ -609,7 +639,7 @@ func TestEditGlobalAndUpdateFailurePreservesInput(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	global := mustCreatePrompt(t, libraries, config.SourceGlobal, "Global", "global body")
 	model := NewWithLibraries([]config.Prompt{global}, libraries)
-	model = update(t, model, key("alt+e"))
+	model = update(t, model, key("e"))
 	model.form.title.SetValue("Changed global")
 	model = update(t, model, key("ctrl+s"))
 	if model.currentPrompt().Source != config.SourceGlobal || model.currentPrompt().Name != "Changed global" {
@@ -621,7 +651,7 @@ func TestEditGlobalAndUpdateFailurePreservesInput(t *testing.T) {
 		return config.Prompt{}, wantErr
 	}}
 	model = NewWithLibraries([]config.Prompt{global}, storage)
-	model = update(t, model, key("alt+e"))
+	model = update(t, model, key("e"))
 	model.form.title.SetValue("Keep this edit")
 	model.form.body.SetValue("keep exact\n")
 	model = update(t, model, key("ctrl+s"))
@@ -641,7 +671,7 @@ func TestEditPreservesPathUnknownMetadataAndRefreshesPreview(t *testing.T) {
 	}
 	prompt := config.Prompt{Name: "Original", Description: "Before", Contents: "old body\n", Source: config.SourceProject, Path: path}
 	model := NewWithLibraries([]config.Prompt{prompt}, libraries)
-	model = update(t, model, key("alt+e"))
+	model = update(t, model, key("e"))
 	if model.form == nil || model.form.body.Value() != "old body\n" {
 		t.Fatalf("edit form = %#v", model.form)
 	}
@@ -692,12 +722,17 @@ func TestDuplicatePrefillsAndAllowsCrossScopeDestination(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	original := mustCreatePrompt(t, libraries, config.SourceProject, "Original", " exact\nbody\n")
 	model := NewWithLibraries([]config.Prompt{original}, libraries)
-	model = update(t, model, key("alt+u"))
+	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 24})
+	model = update(t, model, key("d"))
 	if model.form == nil || model.form.title.Value() != "Original copy" || model.form.body.Value() != original.Contents || model.form.destination != config.SourceProject {
 		t.Fatalf("duplicate form = %#v", model.form)
 	}
 	model.form.destination = config.SourceGlobal
 	model = update(t, model, key("ctrl+s"))
+	if model.confirmation == nil || !contains(model.View().Content, "Duplicate prompt?", "Original", "Original copy", "Global") {
+		t.Fatalf("duplicate confirmation missing context: %s", model.View().Content)
+	}
+	model = update(t, model, key("enter"))
 	if len(model.prompts) != 2 || model.currentPrompt().Source != config.SourceGlobal || model.currentPrompt().Contents != original.Contents {
 		t.Errorf("duplicated prompts = %#v selected=%#v", model.prompts, model.currentPrompt())
 	}
@@ -705,7 +740,7 @@ func TestDuplicatePrefillsAndAllowsCrossScopeDestination(t *testing.T) {
 		t.Errorf("original changed: %v", err)
 	}
 	before := len(model.prompts)
-	model = update(t, model, key("alt+u"))
+	model = update(t, model, key("d"))
 	model = update(t, model, key("esc"))
 	if len(model.prompts) != before {
 		t.Error("cancelled duplicate created a prompt")
@@ -727,11 +762,12 @@ func TestDuplicatePreservesCustomFrontmatterAndRevealsCrossScopeResult(t *testin
 	model.setScope(localScope)
 	model.query = "Original"
 	model.refreshItems(original, true)
-	model = update(t, model, key("alt+u"))
+	model = update(t, model, key("d"))
 	model.form.title.SetValue("Fresh copy")
 	model.form.description.SetValue("")
 	model.form.destination = config.SourceGlobal
 	model = update(t, model, key("ctrl+s"))
+	model = update(t, model, key("enter"))
 
 	duplicate := model.currentPrompt()
 	if model.scope != globalScope || model.query != "" || duplicate.Name != "Fresh copy" || duplicate.Description != "" || duplicate.Source != config.SourceGlobal {
@@ -750,8 +786,9 @@ func TestDuplicateSameScopeAndWriteFailure(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	original := mustCreatePrompt(t, libraries, config.SourceGlobal, "Copy", "body")
 	model := NewWithLibraries([]config.Prompt{original}, libraries)
-	model = update(t, model, key("alt+u"))
+	model = update(t, model, key("d"))
 	model = update(t, model, key("ctrl+s"))
+	model = update(t, model, key("enter"))
 	if len(model.prompts) != 2 || model.currentPrompt().Source != config.SourceGlobal || model.currentPrompt().Path == original.Path {
 		t.Errorf("same-scope duplicate = %#v", model.prompts)
 	}
@@ -761,11 +798,16 @@ func TestDuplicateSameScopeAndWriteFailure(t *testing.T) {
 		return config.Prompt{}, wantErr
 	}}
 	model = NewWithLibraries([]config.Prompt{original}, storage)
-	model = update(t, model, key("alt+u"))
+	model = update(t, model, key("d"))
 	model.form.title.SetValue("Copy retry")
 	model = update(t, model, key("ctrl+s"))
-	if model.form == nil || !errors.Is(model.form.err, wantErr) || model.form.title.Value() != "Copy retry" {
+	model = update(t, model, key("enter"))
+	if model.form == nil || model.confirmation == nil || !errors.Is(model.confirmation.err, wantErr) || model.form.title.Value() != "Copy retry" {
 		t.Errorf("failed duplicate form = %#v", model.form)
+	}
+	model = update(t, model, key("esc"))
+	if model.confirmation != nil || model.form == nil || model.form.title.Value() != "Copy retry" {
+		t.Errorf("failed duplicate values were not restored to form: %#v", model.form)
 	}
 }
 
@@ -796,7 +838,8 @@ func TestEscapeUnwindsFormThenQueryThenPopup(t *testing.T) {
 	model := NewWithLibraries([]config.Prompt{prompt}, libraries)
 	model.query = "Prompt"
 	model.refreshItems(prompt, true)
-	model = update(t, model, key("alt+a"))
+	model = update(t, model, key("a"))
+	model.searchFocused = true
 	model = update(t, model, key("esc"))
 	if model.form != nil || model.query != "Prompt" || model.Cancelled() {
 		t.Fatalf("form escape: form=%v query=%q cancelled=%v", model.form != nil, model.query, model.Cancelled())
@@ -811,12 +854,13 @@ func TestEscapeUnwindsFormThenQueryThenPopup(t *testing.T) {
 	}
 }
 
-func TestManagerImmediatelySearchesFormerActionLetters(t *testing.T) {
+func TestFocusedSearchAcceptsActionLetters(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	for _, query := range []string{"alpha", "edit", "delete", "Duplicate", "move"} {
 		t.Run(query, func(t *testing.T) {
 			prompt := mustCreatePrompt(t, libraries, config.SourceProject, query, "body")
 			model := NewWithLibraries([]config.Prompt{prompt}, libraries)
+			model = update(t, model, key("/"))
 			for _, character := range query {
 				model = update(t, model, key(string(character)))
 			}
@@ -828,13 +872,16 @@ func TestManagerImmediatelySearchesFormerActionLetters(t *testing.T) {
 			model = update(t, model, key(last))
 			updated, command := model.Update(key("enter"))
 			model = updated.(Model)
-			if command == nil {
-				t.Fatal("Enter did not immediately select the filtered prompt")
+			if command != nil || model.searchFocused || model.query != query {
+				t.Fatalf("Enter did not preserve and unfocus search: command=%v focused=%v query=%q", command != nil, model.searchFocused, model.query)
 			}
+			updated, command = model.Update(key("enter"))
+			model = updated.(Model)
 			selection, ok := command().(SelectionMsg)
 			if !ok || selection.Prompt.Path != prompt.Path {
 				t.Fatalf("Enter message = %#v, want selected prompt", selection)
 			}
+			model = update(t, model, key("/"))
 			model = update(t, model, key("esc"))
 			if model.query != "" || model.Cancelled() {
 				t.Fatalf("Esc did not clear query first: query=%q cancelled=%v", model.query, model.Cancelled())
@@ -843,7 +890,7 @@ func TestManagerImmediatelySearchesFormerActionLetters(t *testing.T) {
 	}
 }
 
-func TestModifiedManagementShortcutsOpenExpectedFlows(t *testing.T) {
+func TestManagementShortcutsOpenExpectedFlows(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	prompt := mustCreatePrompt(t, libraries, config.SourceProject, "Prompt", "body")
 	tests := []struct {
@@ -851,11 +898,11 @@ func TestModifiedManagementShortcutsOpenExpectedFlows(t *testing.T) {
 		formMode         formMode
 		confirmationKind confirmationKind
 	}{
-		{key: "alt+a", formMode: createForm},
-		{key: "alt+e", formMode: editForm},
+		{key: "a", formMode: createForm},
+		{key: "e", formMode: editForm},
 		{key: "alt+d", confirmationKind: deleteConfirmation},
-		{key: "alt+u", formMode: duplicateForm},
-		{key: "alt+m", confirmationKind: moveConfirmation},
+		{key: "d", formMode: duplicateForm},
+		{key: "m", confirmationKind: moveConfirmation},
 	}
 	for _, test := range tests {
 		t.Run(test.key, func(t *testing.T) {
@@ -871,6 +918,110 @@ func TestModifiedManagementShortcutsOpenExpectedFlows(t *testing.T) {
 	}
 }
 
+func TestPlainDuplicateNeverDeletesAndMoveLabelTracksSelection(t *testing.T) {
+	deleted := false
+	storage := fakeLibraries{deleteFunc: func(config.Prompt) error {
+		deleted = true
+		return nil
+	}}
+	local := config.Prompt{Name: "Local", Contents: "body", Source: config.SourceProject, Path: "/local.md"}
+	global := config.Prompt{Name: "Global", Contents: "body", Source: config.SourceGlobal, Path: "/global.md"}
+	model := NewWithLibraries([]config.Prompt{local, global}, storage)
+	model = update(t, model, tea.WindowSizeMsg{Width: 100, Height: 24})
+	if !strings.Contains(strings.ToLower(model.View().Content), "move to global") {
+		t.Fatalf("local move label missing: %s", model.View().Content)
+	}
+	model = update(t, model, key("d"))
+	if deleted || model.form == nil || model.form.mode != duplicateForm {
+		t.Fatalf("plain d deleted=%v form=%#v", deleted, model.form)
+	}
+	model = update(t, model, key("esc"))
+	model = update(t, model, key("down"))
+	if !strings.Contains(strings.ToLower(model.View().Content), "move to local") {
+		t.Fatalf("global move label missing: %s", model.View().Content)
+	}
+}
+
+func TestHotkeyDialogIsResponsiveAccurateAndStatePreserving(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 24}, {Width: 120, Height: 30}} {
+		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
+			model := NewWithLibraries([]config.Prompt{{Name: "Local", Contents: "body", Source: config.SourceProject, Path: "/local.md"}}, fakeLibraries{})
+			model = update(t, model, size)
+			model.query = "keep"
+			model = update(t, model, key("?"))
+			view := ansiEscape.ReplaceAllString(model.View().Content, "")
+			for _, text := range []string{"Keyboard shortcuts", "Navigation", "Search", "Prompt Actions", "Preview", "Editor", "Alt+D", "move to global"} {
+				if !strings.Contains(strings.ToLower(view), strings.ToLower(text)) {
+					t.Errorf("shortcut dialog missing %q:\n%s", text, view)
+				}
+			}
+			for _, line := range strings.Split(view, "\n") {
+				if width := lipgloss.Width(line); width > size.Width {
+					t.Errorf("dialog line width = %d, terminal width = %d: %q", width, size.Width, line)
+				}
+			}
+			if lines := len(strings.Split(view, "\n")); lines > size.Height {
+				t.Errorf("dialog height = %d, terminal height = %d", lines, size.Height)
+			}
+			model = update(t, model, key("?"))
+			if model.helpOpen || model.query != "keep" || model.currentPrompt().Name != "Local" {
+				t.Fatalf("? close changed state: open=%v query=%q prompt=%#v", model.helpOpen, model.query, model.currentPrompt())
+			}
+
+			model = update(t, model, key("a"))
+			model.form.title.SetValue("Preserved")
+			model.focusForm(3)
+			model = update(t, model, key("?"))
+			model = update(t, model, key("esc"))
+			if model.helpOpen || model.form == nil || model.form.title.Value() != "Preserved" {
+				t.Fatalf("help changed form state: open=%v form=%#v", model.helpOpen, model.form)
+			}
+		})
+	}
+}
+
+func TestConfirmationsAcceptYAndCancelN(t *testing.T) {
+	deleteCalls := 0
+	duplicateCalls := 0
+	prompt := config.Prompt{Name: "Original", Contents: "body", Source: config.SourceProject, Path: "/original.md"}
+	storage := fakeLibraries{
+		deleteFunc: func(config.Prompt) error {
+			deleteCalls++
+			return nil
+		},
+		duplicateFunc: func(_ config.Prompt, destination string, changes config.Prompt) (config.Prompt, error) {
+			duplicateCalls++
+			changes.Source = destination
+			changes.Path = "/copy.md"
+			return changes, nil
+		},
+	}
+	model := NewWithLibraries([]config.Prompt{prompt}, storage)
+	model = update(t, model, key("alt+d"))
+	model = update(t, model, key("n"))
+	if deleteCalls != 0 || model.confirmation != nil {
+		t.Fatalf("n delete cancellation: calls=%d confirmation=%#v", deleteCalls, model.confirmation)
+	}
+	model = update(t, model, key("alt+d"))
+	model = update(t, model, key("y"))
+	if deleteCalls != 1 {
+		t.Fatalf("y delete confirmation calls = %d", deleteCalls)
+	}
+
+	model = NewWithLibraries([]config.Prompt{prompt}, storage)
+	model = update(t, model, key("d"))
+	model = update(t, model, key("ctrl+s"))
+	model = update(t, model, key("n"))
+	if duplicateCalls != 0 || model.form == nil || model.form.title.Value() != "Original copy" {
+		t.Fatalf("n duplicate cancellation: calls=%d form=%#v", duplicateCalls, model.form)
+	}
+	model = update(t, model, key("ctrl+s"))
+	model = update(t, model, key("y"))
+	if duplicateCalls != 1 || model.form != nil || len(model.prompts) != 2 {
+		t.Fatalf("y duplicate confirmation: calls=%d form=%#v prompts=%#v", duplicateCalls, model.form, model.prompts)
+	}
+}
+
 func TestMoveBothDirectionsAndPartialFailure(t *testing.T) {
 	for _, source := range []string{config.SourceProject, config.SourceGlobal} {
 		t.Run(source, func(t *testing.T) {
@@ -880,7 +1031,7 @@ func TestMoveBothDirectionsAndPartialFailure(t *testing.T) {
 			model = update(t, model, tea.WindowSizeMsg{Width: 100, Height: 30})
 			model.query = "Move"
 			model.refreshItems(prompt, true)
-			model = update(t, model, key("alt+m"))
+			model = update(t, model, key("m"))
 			wantDestination := "Global"
 			if source == config.SourceGlobal {
 				wantDestination = "Local"
@@ -903,7 +1054,7 @@ func TestMoveBothDirectionsAndPartialFailure(t *testing.T) {
 	partial := &config.PartialMoveError{SourcePath: source.Path, DestinationPath: destination.Path, Err: errors.New("permission denied")}
 	storage := fakeLibraries{moveFunc: func(config.Prompt, string) (config.Prompt, error) { return destination, partial }}
 	model := NewWithLibraries([]config.Prompt{source}, storage)
-	model = update(t, model, key("alt+m"))
+	model = update(t, model, key("m"))
 	model = update(t, model, key("enter"))
 	if len(model.prompts) != 2 || model.operationErr == nil || !contains(model.operationErr.Error(), source.Path, destination.Path, "both files remain") {
 		t.Errorf("partial move prompts=%#v err=%v", model.prompts, model.operationErr)
@@ -953,16 +1104,8 @@ func key(value string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'l', Mod: tea.ModCtrl}
 	case "ctrl+s":
 		return tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
-	case "alt+a":
-		return tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt}
-	case "alt+e":
-		return tea.KeyPressMsg{Code: 'e', Mod: tea.ModAlt}
 	case "alt+d":
 		return tea.KeyPressMsg{Code: 'd', Mod: tea.ModAlt}
-	case "alt+u":
-		return tea.KeyPressMsg{Code: 'u', Mod: tea.ModAlt}
-	case "alt+m":
-		return tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt}
 	case "pgup":
 		return tea.KeyPressMsg{Code: tea.KeyPgUp}
 	case "pgdown":

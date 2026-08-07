@@ -24,8 +24,15 @@ var (
 				Foreground(accentColor)
 	helpStyle = lipgloss.NewStyle().
 			Foreground(mutedColor)
-	itemNameStyle = lipgloss.NewStyle().
-			Bold(true)
+	searchCursorStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(accentColor)
+	shortcutKeyStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(accentColor)
+	shortcutActionStyle = helpStyle
+	itemNameStyle       = lipgloss.NewStyle().
+				Bold(true)
 	selectedItemNameStyle = itemNameStyle.
 				Foreground(accentColor)
 	itemDescriptionStyle = lipgloss.NewStyle().
