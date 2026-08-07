@@ -145,7 +145,7 @@ func TestPickerModelInjectsConfiguredLibrariesAndReportsConfigurationFailure(t *
 		t.Fatal(err)
 	}
 	updated, command := model.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	if command != nil || !strings.Contains(updated.(ui.Model).View().Content, "Create prompt") {
+	if command != nil || !strings.Contains(updated.(ui.Model).View().Content, "Create Prompt") {
 		t.Error("configured libraries did not enable popup management")
 	}
 }

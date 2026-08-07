@@ -747,7 +747,7 @@ func TestFormViewHighlightsFocusedField(t *testing.T) {
 }
 
 func TestFormViewFitsSupportedNarrowAndWideSizes(t *testing.T) {
-	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 24}, {Width: 120, Height: 30}} {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 24}, {Width: wideLayoutMinimum, Height: 24}, {Width: 120, Height: 30}} {
 		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
 			model := NewWithLibraries(nil, fakeLibraries{})
 			model = update(t, model, size)
@@ -765,6 +765,75 @@ func TestFormViewFitsSupportedNarrowAndWideSizes(t *testing.T) {
 				t.Errorf("destination controls missing at %dx%d", size.Width, size.Height)
 			}
 		})
+	}
+}
+
+func TestEditorHeadingAndPlaceholderAlignment(t *testing.T) {
+	for _, layout := range []struct {
+		name string
+		size tea.WindowSizeMsg
+		wide bool
+	}{
+		{name: "narrow", size: tea.WindowSizeMsg{Width: 60, Height: 24}},
+		{name: "threshold", size: tea.WindowSizeMsg{Width: wideLayoutMinimum, Height: 24}, wide: true},
+		{name: "wide", size: tea.WindowSizeMsg{Width: 120, Height: 30}, wide: true},
+	} {
+		for _, mode := range []struct {
+			name    string
+			form    formMode
+			heading string
+		}{
+			{name: "create", form: createForm, heading: "Create Prompt"},
+			{name: "edit", form: editForm, heading: "Edit Prompt"},
+			{name: "duplicate", form: duplicateForm, heading: "Duplicate Prompt"},
+		} {
+			t.Run(layout.name+"/"+mode.name, func(t *testing.T) {
+				model := NewWithLibraries(nil, fakeLibraries{})
+				model = update(t, model, layout.size)
+				model.openForm(mode.form, config.Prompt{Name: "Existing", Contents: "body", Source: config.SourceProject, Path: "/existing.md"})
+				styledView := model.View().Content
+				if !strings.Contains(styledView, editorHeadingStyle.Render(mode.heading)) {
+					t.Fatalf("heading does not use emphasized style: %q", mode.heading)
+				}
+				view := ansiEscape.ReplaceAllString(styledView, "")
+				lines := strings.Split(view, "\n")
+				headingLine, titleLine, sidebarLine, panelTop := -1, -1, -1, -1
+				for index, line := range lines {
+					if strings.Contains(line, mode.heading) {
+						headingLine = index
+					}
+					if strings.Contains(line, "╭─ Title ") {
+						titleLine = index
+					}
+					if strings.Contains(line, "╭─ Herdr placeholders ") {
+						sidebarLine = index
+					}
+					if panelTop < 0 && strings.Contains(line, "╭") {
+						panelTop = index
+					}
+					if width := lipgloss.Width(line); width > layout.size.Width {
+						t.Errorf("line width = %d, terminal width = %d: %q", width, layout.size.Width, line)
+					}
+				}
+				if headingLine < 0 || titleLine < 0 || panelTop < 0 {
+					t.Fatalf("editor heading or title field missing:\n%s", view)
+				}
+				if headingLine <= panelTop+1 || strings.Trim(strings.Trim(lines[headingLine-1], "│ "), "") != "" {
+					t.Errorf("heading lacks a top inset: panel=%d heading=%d\n%s", panelTop, headingLine, view)
+				}
+				headingOffset := strings.Index(lines[headingLine], mode.heading)
+				if headingOffset <= 1 || headingOffset < (layout.size.Width-len(mode.heading))/3 {
+					t.Errorf("heading is not centered: offset=%d width=%d\n%s", headingOffset, layout.size.Width, view)
+				}
+				if layout.wide {
+					if sidebarLine != titleLine {
+						t.Errorf("placeholder border=%d, title border=%d\n%s", sidebarLine, titleLine, view)
+					}
+				} else if sidebarLine >= 0 || !strings.Contains(view, "No Herdr placeholders") {
+					t.Errorf("narrow placeholder state changed:\n%s", view)
+				}
+			})
+		}
 	}
 }
 

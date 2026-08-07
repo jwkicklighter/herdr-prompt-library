@@ -1169,19 +1169,19 @@ func (model Model) statePanel(contents string) string {
 
 func (model Model) formPanel() string {
 	form := model.form
-	heading := "Create prompt"
+	heading := "Create Prompt"
 	switch form.mode {
 	case editForm:
-		heading = "Edit prompt"
+		heading = "Edit Prompt"
 	case duplicateForm:
-		heading = "Duplicate prompt"
+		heading = "Duplicate Prompt"
 	}
 	destination := "Local"
 	if form.destination == config.SourceGlobal {
 		destination = "Global"
 	}
 	fieldWidth := model.formFieldWidth()
-	lines := []string{titleStyle.Render(heading), "", formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Prompt", form.body.View(), fieldWidth, form.focus == 1)}
+	lines := []string{formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Prompt", form.body.View(), fieldWidth, form.focus == 1)}
 	if form.mode != editForm {
 		lines = append(lines, destinationControl(destination, form.focus == 2))
 	}
@@ -1199,7 +1199,8 @@ func (model Model) formPanel() string {
 		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("None exposed by Herdr 0.8.0."), panelContentWidth(sidebarOuterWidth))
 		contents = lipgloss.JoinHorizontal(lipgloss.Top, contents, strings.Repeat(" ", panelGap), sidebar)
 	}
-	return panelStyle.Render(contents)
+	headingLine := lipgloss.PlaceHorizontal(model.formWidth(), lipgloss.Center, editorHeadingStyle.Render(heading))
+	return panelStyle.Render("\n" + headingLine + "\n\n" + contents)
 }
 
 func (model *Model) sizeForm() {
@@ -1209,7 +1210,7 @@ func (model *Model) sizeForm() {
 	inputWidth := max(1, model.formFieldWidth()-2)
 	model.form.title.SetWidth(inputWidth)
 	model.form.body.SetWidth(inputWidth)
-	model.form.body.SetHeight(max(3, model.height-16))
+	model.form.body.SetHeight(max(3, model.height-17))
 }
 
 func (model Model) formWidth() int {

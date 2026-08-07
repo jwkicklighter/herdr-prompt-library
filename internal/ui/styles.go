@@ -13,10 +13,14 @@ var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(accentColor)
-	pickerTitleStyle = titleStyle.Underline(true)
-	panelStyle       = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(mutedColor)
+	pickerTitleStyle   = titleStyle.Underline(true)
+	editorHeadingStyle = titleStyle.Copy().
+				Bold(true).
+				Reverse(true).
+				Padding(0, 1)
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(mutedColor)
 	formFieldBorderStyle = lipgloss.NewStyle().
 				Foreground(mutedColor)
 	focusedFormFieldBorderStyle = lipgloss.NewStyle().
