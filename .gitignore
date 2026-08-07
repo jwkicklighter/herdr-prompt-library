@@ -1,4 +1,6 @@
 
+bin/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

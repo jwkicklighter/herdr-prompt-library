@@ -12,7 +12,7 @@ Prompt Library is a local [Herdr](https://herdr.dev) plugin for browsing, managi
 From this repository, build the plugin:
 
 ```sh
-go build -o bin/herdr-prompt-library ./cmd/herdr-prompt-library
+make build
 ```
 
 Link the local checkout and enable it:
