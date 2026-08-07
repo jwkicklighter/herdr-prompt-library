@@ -367,6 +367,44 @@ func TestViewShowsSourcesAndResponsiveLayout(t *testing.T) {
 	}
 }
 
+func TestPickerChromeUsesTitledBordersEvenPaddingAndBounds(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 25}, {Width: 120, Height: 30}} {
+		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
+			model := update(t, New(testPrompts()), size)
+			view := ansiEscape.ReplaceAllString(model.View().Content, "")
+			if !contains(view, "╭─ Prompts ", "╭─ Preview ") {
+				t.Fatalf("panel titles are not in top borders:\n%s", view)
+			}
+			if strings.Count(view, "Prompts") != 1 || strings.Count(view, "Preview") != 1 {
+				t.Fatalf("panel titles are duplicated outside their borders:\n%s", view)
+			}
+			lines := strings.Split(view, "\n")
+			if strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[len(lines)-1]) != "" {
+				t.Fatalf("view is missing vertical outer padding:\n%s", view)
+			}
+			for _, line := range lines {
+				if lipgloss.Width(line) > size.Width {
+					t.Errorf("line width = %d, terminal width = %d: %q", lipgloss.Width(line), size.Width, line)
+				}
+				if strings.TrimSpace(line) != "" && (!strings.HasPrefix(line, " ") || !strings.HasSuffix(line, " ")) {
+					t.Errorf("content line lacks even horizontal padding: %q", line)
+				}
+			}
+		})
+	}
+}
+
+func TestFooterGroupsUseThemeColorsAndSpacing(t *testing.T) {
+	if accentColor != lipgloss.Color("6") || mutedColor != lipgloss.Color("7") {
+		t.Fatalf("theme colors = accent %q muted %q, want ANSI cyan and gray", accentColor, mutedColor)
+	}
+	got := footerGroups([]footerGroup{{"enter", "insert"}, {"esc", "close"}})
+	want := titleStyle.Render("enter") + " " + helpStyle.Render("insert") + "    " + titleStyle.Render("esc") + " " + helpStyle.Render("close")
+	if got != want {
+		t.Fatalf("footer = %q, want %q", got, want)
+	}
+}
+
 func TestEmptyStateIsActionableAndCannotSelect(t *testing.T) {
 	model := New(nil, nil)
 	model = update(t, model, tea.WindowSizeMsg{Width: 70, Height: 20})
@@ -519,7 +557,7 @@ func TestFormViewRendersLabeledBorderedFieldsWithSpacing(t *testing.T) {
 			t.Errorf("form view missing labeled %s border:\n%s", label, view)
 		}
 	}
-	fieldGap := regexp.MustCompile(`╯│\n│ *│\n│╭─ Prompt `)
+	fieldGap := regexp.MustCompile(`╯│ *\n *│ *│ *\n *│╭─ Prompt `)
 	if matches := fieldGap.FindAllString(view, -1); len(matches) != 1 {
 		t.Errorf("form fields are not vertically separated:\n%s", view)
 	}
@@ -607,6 +645,24 @@ func TestDestinationControlKeyboardAndEditFormFields(t *testing.T) {
 	view := ansiEscape.ReplaceAllString(model.View().Content, "")
 	if strings.Contains(view, "Destination:") || strings.Contains(view, "Description") || !strings.Contains(view, "Prompt") {
 		t.Errorf("edit fields = %q", view)
+	}
+}
+
+func TestEditorReportsOfficialPlaceholderAvailabilityResponsively(t *testing.T) {
+	wide := NewWithLibraries(nil, fakeLibraries{})
+	wide = update(t, wide, tea.WindowSizeMsg{Width: 120, Height: 30})
+	wide = update(t, wide, key("a"))
+	wideView := ansiEscape.ReplaceAllString(wide.View().Content, "")
+	if !contains(wideView, "╭─ Herdr placeholders ", "None exposed by Herdr 0.8.0.") {
+		t.Fatalf("wide editor does not show the placeholder sidebar:\n%s", wideView)
+	}
+
+	narrow := NewWithLibraries(nil, fakeLibraries{})
+	narrow = update(t, narrow, tea.WindowSizeMsg{Width: 60, Height: 24})
+	narrow = update(t, narrow, key("a"))
+	narrowView := ansiEscape.ReplaceAllString(narrow.View().Content, "")
+	if !strings.Contains(narrowView, "No Herdr placeholders") || strings.Contains(narrowView, "╭─ Herdr placeholders ") {
+		t.Fatalf("narrow editor did not collapse the placeholder sidebar:\n%s", narrowView)
 	}
 }
 

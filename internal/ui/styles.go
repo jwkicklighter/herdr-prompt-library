@@ -3,8 +3,11 @@ package ui
 import "charm.land/lipgloss/v2"
 
 var (
-	accentColor = lipgloss.Color("63")
-	mutedColor  = lipgloss.Color("241")
+	// Herdr forwards its active terminal palette to pane applications. Using
+	// ANSI cyan and gray keeps the picker aligned with that palette instead of
+	// pinning it to fixed 256-color values.
+	accentColor = lipgloss.Color("6")
+	mutedColor  = lipgloss.Color("7")
 
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -39,10 +42,10 @@ var (
 				Foreground(mutedColor)
 	localBadgeStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("42"))
+			Foreground(accentColor)
 	globalBadgeStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("39"))
+				Foreground(accentColor)
 	scopeStyle = lipgloss.NewStyle().
 			Foreground(mutedColor).
 			Padding(0, 1)
@@ -51,5 +54,6 @@ var (
 				Foreground(accentColor)
 	errorStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("196"))
+			Foreground(lipgloss.Color("1"))
+	outerStyle = lipgloss.NewStyle().Padding(1)
 )

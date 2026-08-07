@@ -22,7 +22,8 @@ func TestOpenPickerBuildsArgumentVector(t *testing.T) {
 
 	target := "pane; $(not-a-command)"
 	root := "/tmp/project with spaces; $HOME"
-	if err := client.OpenPicker(target, root); err != nil {
+	contextJSON := `{"selected_text":"selected bytes"}`
+	if err := client.OpenPicker(target, root, contextJSON); err != nil {
 		t.Fatalf("OpenPicker() error = %v", err)
 	}
 
@@ -35,6 +36,7 @@ func TestOpenPickerBuildsArgumentVector(t *testing.T) {
 		"--entrypoint", PickerEntrypoint,
 		"--env", TargetPaneIDEnv + "=" + target,
 		"--env", ProjectRootEnv + "=" + root,
+		"--env", ContextJSONEnv + "=" + contextJSON,
 	}
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Errorf("arguments = %#v, want %#v", gotArgs, wantArgs)
@@ -52,7 +54,7 @@ func TestOpenPickerBuildsArgumentVector(t *testing.T) {
 func TestOpenPickerReturnsRunnerError(t *testing.T) {
 	want := errors.New("herdr unavailable")
 	client := Client{Run: func(string, []string, []string) error { return want }}
-	err := client.OpenPicker("pane-1", "/project")
+	err := client.OpenPicker("pane-1", "/project", `{}`)
 	if !errors.Is(err, want) {
 		t.Errorf("OpenPicker() error = %v, want %v", err, want)
 	}

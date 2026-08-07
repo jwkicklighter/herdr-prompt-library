@@ -79,6 +79,12 @@ Explain this code concisely, including its inputs and outputs.
 
 The closing frontmatter delimiter must be on its own line. Everything after it is the body and is inserted exactly, including blank lines, indentation, trailing spaces, and final newlines. Frontmatter is never inserted. A filename is an organizational detail, not the prompt title; titles do not need to be unique.
 
+## Herdr context and placeholders
+
+Herdr 0.8.0 passes action context to plugins through `HERDR_PLUGIN_CONTEXT_JSON`, and Prompt Library carries that official context unchanged into the picker. The current Herdr plugin contract does not define a placeholder syntax or any official placeholder names, however, so Prompt Library does not invent its own variables. Text that looks like a template token is saved and inserted literally, byte for byte.
+
+The editor shows this limitation in its placeholder area. On wide panes it appears as a right sidebar; on narrow panes it collapses to a compact status line. Placeholder navigation and insertion will only be enabled when Herdr publishes an official token contract.
+
 ## Views and search
 
 The picker has three source views:
@@ -134,6 +140,8 @@ Prompt titles are display metadata, not filenames or keys. Two files may have th
 - `esc`/`n`: cancel a form or confirmation; `esc` closes the unfocused picker without inserting
 
 The popup resizes with Herdr. On wide terminals, the prompt list and preview are side by side; on narrower terminals, they stack vertically. Closing the popup returns focus to the pane that opened it.
+
+Picker accents use ANSI cyan and muted text uses ANSI gray. Herdr forwards its active terminal palette to pane applications, so these colors follow the active Herdr/terminal scheme without a plugin-specific theme setting.
 
 ## Troubleshooting
 

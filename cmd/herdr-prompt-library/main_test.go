@@ -54,6 +54,32 @@ func TestPickerModelInsertsExactPromptIntoCapturedPane(t *testing.T) {
 	}
 }
 
+func TestPickerLeavesUnsupportedTokenLookingTextLiteral(t *testing.T) {
+	contents := "selected={{selected_text}} unknown={{anything}}\n"
+	var gotArgs []string
+	model, err := pickerModel(env(
+		herdr.TargetPaneIDEnv, "pane-at-open",
+		herdr.ContextJSONEnv, `{"selected_text":"must not be substituted without an official token contract"}`,
+	), func() ([]config.Prompt, error) {
+		return []config.Prompt{{Name: "literal", Contents: contents}}, nil
+	}, testConfiguredLibraries, herdr.Client{Run: func(_ string, args []string, _ []string) error {
+		gotArgs = args
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := model.Update(keyEnter())
+	updated, command = updated.(ui.Model).Update(command())
+	result := command().(ui.InsertionResultMsg)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if got := gotArgs[len(gotArgs)-1]; got != contents {
+		t.Fatalf("sent contents = %q, want literal %q", got, contents)
+	}
+}
+
 func TestPickerModelUsesDefaultBinaryAndStaysOpenOnInsertionFailure(t *testing.T) {
 	want := errors.New("target pane disappeared")
 	var gotName string
@@ -202,6 +228,7 @@ func TestOpenRootFallbacksAndArgumentPropagation(t *testing.T) {
 				"plugin", "pane", "open", "--plugin", herdr.PluginID, "--entrypoint", herdr.PickerEntrypoint,
 				"--env", herdr.TargetPaneIDEnv + "=" + test.target,
 				"--env", herdr.ProjectRootEnv + "=" + test.root,
+				"--env", herdr.ContextJSONEnv + "=" + test.json,
 			}
 			if !reflect.DeepEqual(gotArgs, wantArgs) {
 				t.Errorf("arguments = %#v, want %#v", gotArgs, wantArgs)

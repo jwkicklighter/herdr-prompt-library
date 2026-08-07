@@ -139,6 +139,7 @@ func (promptDelegate) Render(writer io.Writer, model list.Model, index int, raw 
 	if remaining := lineWidth - lipgloss.Width(name) - lipgloss.Width(badge) - 1; remaining >= 0 {
 		firstLine += strings.Repeat(" ", remaining+1) + badge
 	}
+	fmt.Fprint(writer, firstLine)
 	for _, excerpt := range promptExcerpt(item.prompt.Contents, max(1, lineWidth-2)) {
 		fmt.Fprint(writer, "\n  "+itemDescriptionStyle.Render(excerpt))
 	}
@@ -198,6 +199,7 @@ func newModel(prompts []config.Prompt, insert func(config.Prompt) error, librari
 
 	promptList := list.New(nil, promptDelegate{}, 0, 0)
 	promptList.Title = "Prompts"
+	promptList.SetShowTitle(false)
 	promptList.SetFilteringEnabled(false)
 	promptList.SetShowFilter(false)
 	promptList.SetShowHelp(false)
@@ -709,7 +711,7 @@ func (model Model) View() tea.View {
 	case len(model.list.Items()) == 0:
 		body = model.statePanel(model.emptyState())
 	default:
-		listPanel := panelStyle.Render(model.list.View())
+		listPanel := titledPanel("Prompts", model.list.View(), model.list.Width())
 		previewPanel := model.previewPanel()
 		if model.wide {
 			body = lipgloss.JoinHorizontal(lipgloss.Top, listPanel, strings.Repeat(" ", panelGap), previewPanel)
@@ -727,13 +729,13 @@ func (model Model) View() tea.View {
 		body = model.statePanel(errorStyle.Render("Could not insert prompt")+"\n\n"+model.insertErr.Error()+"\n\nCheck that Herdr is running and the target pane still exists, then press Enter to retry.") + "\n" + body
 	}
 
-	help := "/ search | up/down navigate | tab scope | ? shortcuts | enter select | esc close"
+	footer := footerGroups([]footerGroup{{"/", "search"}, {"↑/↓", "navigate"}, {"tab", "scope"}, {"?", "shortcuts"}, {"enter", "select"}, {"esc", "close"}})
 	if model.libraries != nil {
-		help = "/ search | a add | e edit | d duplicate | m " + strings.ToLower(model.moveActionLabel()) + " | alt+d delete | ? help"
+		footer = footerGroups([]footerGroup{{"/", "search"}, {"a", "add"}, {"e", "edit"}, {"d", "duplicate"}, {"m", strings.ToLower(model.moveActionLabel())}, {"alt+d", "delete"}, {"?", "help"}})
 	} else if !model.wide {
-		help = "/ search | arrows move | tab scope | ^a/^l/^g | ? help | enter select"
+		footer = footerGroups([]footerGroup{{"/", "search"}, {"arrows", "move"}, {"tab", "scope"}, {"^a/^l/^g", "views"}, {"?", "help"}, {"enter", "select"}})
 	}
-	footer := helpStyle.Render(lipgloss.Wrap(help, max(1, model.width), ""))
+	footer = lipgloss.Wrap(footer, max(1, model.width), "")
 	if model.form != nil || model.helpOpen {
 		// The form includes its own shortcut help; omitting the global footer
 		// leaves room for every field in short panes.
@@ -750,15 +752,15 @@ func (model Model) View() tea.View {
 	if footer != "" {
 		viewContents += "\n" + footer
 	}
-	view := tea.NewView(viewContents)
+	view := tea.NewView(outerStyle.Render(viewContents))
 	view.AltScreen = true
 	return view
 }
 
 func (model *Model) resize(width, height int) {
-	model.width = max(1, width)
-	model.height = max(1, height)
-	model.wide = width >= wideLayoutMinimum
+	model.width = max(1, width-outerStyle.GetHorizontalFrameSize())
+	model.height = max(1, height-outerStyle.GetVerticalFrameSize())
+	model.wide = model.width >= wideLayoutMinimum
 	if model.form != nil {
 		model.sizeForm()
 	}
@@ -787,7 +789,7 @@ func (model *Model) setListSize(panelWidth, panelHeight int) {
 
 func (model *Model) setPreviewSize(panelWidth, panelHeight int) {
 	innerWidth := max(1, panelWidth-panelStyle.GetHorizontalFrameSize())
-	innerHeight := max(1, panelHeight-panelStyle.GetVerticalFrameSize()-2)
+	innerHeight := max(1, panelHeight-panelStyle.GetVerticalFrameSize())
 	model.preview.SetWidth(innerWidth)
 	model.preview.SetHeight(innerHeight)
 	model.refreshPreview()
@@ -1088,12 +1090,37 @@ func (model Model) emptyState() string {
 }
 
 func (model Model) previewPanel() string {
-	item, _ := model.list.SelectedItem().(promptItem)
-	heading := previewTitleStyle.Render("Preview")
-	if item.prompt.Name != "" {
-		heading += helpStyle.Render("  " + item.prompt.Name)
+	return titledPanel("Preview", model.preview.View(), model.preview.Width())
+}
+
+type footerGroup struct {
+	key    string
+	action string
+}
+
+func footerGroups(groups []footerGroup) string {
+	parts := make([]string, 0, len(groups))
+	for _, group := range groups {
+		parts = append(parts, titleStyle.Render(group.key)+" "+helpStyle.Render(group.action))
 	}
-	return panelStyle.Render(heading + "\n\n" + model.preview.View())
+	return strings.Join(parts, "    ")
+}
+
+func titledPanel(title, contents string, innerWidth int) string {
+	innerWidth = max(1, innerWidth)
+	label := " " + title + " "
+	label = ansi.Cut(label, 0, max(1, innerWidth-1))
+	topFill := max(0, innerWidth-ansi.StringWidth(label)-1)
+	top := formFieldBorderStyle.Render("╭─") + previewTitleStyle.Render(label) + formFieldBorderStyle.Render(strings.Repeat("─", topFill)+"╮")
+
+	rows := strings.Split(contents, "\n")
+	for index, row := range rows {
+		row = ansi.Cut(row, 0, innerWidth)
+		row += strings.Repeat(" ", max(0, innerWidth-ansi.StringWidth(row)))
+		rows[index] = formFieldBorderStyle.Render("│") + row + formFieldBorderStyle.Render("│")
+	}
+	bottom := formFieldBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	return top + "\n" + strings.Join(rows, "\n") + "\n" + bottom
 }
 
 func (model Model) statePanel(contents string) string {
@@ -1115,7 +1142,7 @@ func (model Model) formPanel() string {
 	if form.destination == config.SourceGlobal {
 		destination = "Global"
 	}
-	fieldWidth := model.formWidth()
+	fieldWidth := model.formFieldWidth()
 	lines := []string{titleStyle.Render(heading), "", formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Prompt", form.body.View(), fieldWidth, form.focus == 1)}
 	if form.mode != editForm {
 		lines = append(lines, destinationControl(destination, form.focus == 2))
@@ -1123,15 +1150,25 @@ func (model Model) formPanel() string {
 	if form.err != nil {
 		lines = append(lines, "", errorStyle.Render("Could not save prompt: ")+form.err.Error())
 	}
-	lines = append(lines, "", helpStyle.Render("Tab/Shift+Tab fields | Enter newline in prompt | arrows/space destination | Ctrl+S save | Esc cancel"))
-	return panelStyle.Width(fieldWidth + panelStyle.GetHorizontalFrameSize()).Render(strings.Join(lines, "\n"))
+	if !model.wide {
+		lines = append(lines, helpStyle.Render("No Herdr placeholders | Tab fields | ^S save | Esc"))
+	} else {
+		lines = append(lines, "", helpStyle.Render(lipgloss.Wrap("Tab/Shift+Tab fields | Enter newline in prompt | arrows/space destination | Ctrl+S save | Esc cancel", fieldWidth, "")))
+	}
+	contents := strings.Join(lines, "\n")
+	if model.wide {
+		sidebarOuterWidth := max(18, model.formWidth()-fieldWidth-panelGap)
+		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("None exposed by Herdr 0.8.0."), max(1, sidebarOuterWidth-2))
+		contents = lipgloss.JoinHorizontal(lipgloss.Top, contents, strings.Repeat(" ", panelGap), sidebar)
+	}
+	return panelStyle.Render(contents)
 }
 
 func (model *Model) sizeForm() {
 	if model.form == nil {
 		return
 	}
-	inputWidth := max(1, model.formWidth()-2)
+	inputWidth := max(1, model.formFieldWidth()-2)
 	model.form.title.SetWidth(inputWidth)
 	model.form.body.SetWidth(inputWidth)
 	model.form.body.SetHeight(max(3, model.height-16))
@@ -1143,6 +1180,14 @@ func (model Model) formWidth() int {
 		width = 80
 	}
 	return max(3, width-panelStyle.GetHorizontalFrameSize())
+}
+
+func (model Model) formFieldWidth() int {
+	width := model.formWidth()
+	if model.wide {
+		return max(3, (width-panelGap)*2/3)
+	}
+	return width
 }
 
 func formField(label, contents string, width int, focused bool) string {
