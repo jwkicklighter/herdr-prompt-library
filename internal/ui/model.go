@@ -16,6 +16,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"herdr-prompt-library/internal/config"
 )
@@ -202,7 +203,6 @@ func newModel(prompts []config.Prompt, insert func(config.Prompt) error, librari
 	promptList.DisableQuitKeybindings()
 
 	preview := viewport.New(viewport.WithWidth(1), viewport.WithHeight(1))
-	preview.SoftWrap = true
 	preview.FillHeight = true
 
 	model := Model{
@@ -732,6 +732,7 @@ func (model *Model) setPreviewSize(panelWidth, panelHeight int) {
 	innerHeight := max(1, panelHeight-panelStyle.GetVerticalFrameSize()-2)
 	model.preview.SetWidth(innerWidth)
 	model.preview.SetHeight(innerHeight)
+	model.refreshPreview()
 }
 
 func (model *Model) refreshPreview() {
@@ -740,8 +741,80 @@ func (model *Model) refreshPreview() {
 		model.preview.SetContent("")
 		return
 	}
-	model.preview.SetContent(item.prompt.Contents)
+	content := item.prompt.Contents
+	if model.preview.Width() > 1 {
+		content = wrapPreview(content, model.preview.Width())
+	}
+	model.preview.SetContent(content)
 	model.preview.GotoTop()
+}
+
+func wrapPreview(contents string, width int) string {
+	width = max(1, width)
+	physicalLines := strings.Split(strings.ReplaceAll(contents, "\r\n", "\n"), "\n")
+	wrapped := make([]string, 0, len(physicalLines))
+	for _, line := range physicalLines {
+		wrapped = append(wrapped, wrapPreviewLine(line, width)...)
+	}
+	return strings.Join(wrapped, "\n")
+}
+
+func wrapPreviewLine(line string, width int) []string {
+	if strings.TrimSpace(line) == "" {
+		return []string{""}
+	}
+
+	var wrapped []string
+	current := ""
+	flush := func() {
+		if current != "" {
+			wrapped = append(wrapped, current)
+			current = ""
+		}
+	}
+	runes := []rune(line)
+	for index := 0; index < len(runes); {
+		start := index
+		whitespace := unicode.IsSpace(runes[index])
+		for index < len(runes) && unicode.IsSpace(runes[index]) == whitespace {
+			index++
+		}
+		token := string(runes[start:index])
+		if whitespace && current == "" && len(wrapped) > 0 {
+			continue
+		}
+		if whitespace && current != "" && ansi.StringWidth(current+token) > width {
+			flush()
+			continue
+		}
+		if ansi.StringWidth(token) > width {
+			trimmed := strings.TrimRightFunc(current, unicode.IsSpace)
+			if trimmed != "" {
+				current = trimmed
+			}
+			flush()
+			for offset := 0; offset < ansi.StringWidth(token); offset += width {
+				chunk := ansi.Cut(token, offset, offset+width)
+				if chunk == "" {
+					break
+				}
+				if ansi.StringWidth(chunk) == width || offset+ansi.StringWidth(chunk) < ansi.StringWidth(token) {
+					wrapped = append(wrapped, chunk)
+				} else {
+					current = chunk
+				}
+			}
+			continue
+		}
+
+		candidate := current + token
+		if ansi.StringWidth(candidate) > width {
+			flush()
+		}
+		current += token
+	}
+	flush()
+	return wrapped
 }
 
 func (model *Model) setScope(scope libraryScope) {

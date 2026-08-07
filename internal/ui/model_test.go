@@ -247,6 +247,30 @@ func TestPreviewScrollingIsIndependentAndResetsOnNavigation(t *testing.T) {
 	}
 }
 
+func TestPreviewWrapsAtWordBoundaries(t *testing.T) {
+	got := wrapPreview("alpha beta gamma\n\ndelta", 10)
+	want := "alpha beta\ngamma\n\ndelta"
+	if got != want {
+		t.Fatalf("wrapped preview = %q, want %q", got, want)
+	}
+}
+
+func TestPreviewSplitsOverlongTokensSafely(t *testing.T) {
+	got := wrapPreview("short supercalifragilistic", 8)
+	want := "short\nsupercal\nifragili\nstic"
+	if got != want {
+		t.Fatalf("overlong preview = %q, want %q", got, want)
+	}
+}
+
+func TestPreviewPreservesIndentationAndRepeatedWhitespace(t *testing.T) {
+	got := wrapPreview("  alpha   beta\tgamma", 13)
+	want := "  alpha   \nbeta\tgamma"
+	if got != want {
+		t.Fatalf("whitespace-preserving preview = %q, want %q", got, want)
+	}
+}
+
 func TestResizeSwitchesLayoutsAndRecalculatesComponents(t *testing.T) {
 	model := newTestModel(t)
 	model = update(t, model, tea.WindowSizeMsg{Width: 120, Height: 30})
