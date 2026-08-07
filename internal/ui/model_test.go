@@ -375,6 +375,68 @@ func TestCreatePromptsInBothScopesWithExactBody(t *testing.T) {
 	}
 }
 
+func TestFormBodyAcceptsBracketedPasteInEveryMode(t *testing.T) {
+	prompt := config.Prompt{
+		Name:        "Original",
+		Description: "Description",
+		Contents:    "existing body\n",
+		Source:      config.SourceProject,
+		Path:        "/project/original.md",
+	}
+	pasted := "  ctrl+s\nesc    alt+d  \n  \n"
+	tests := []struct {
+		name     string
+		shortcut string
+		initial  string
+	}{
+		{name: "create", shortcut: "alt+a"},
+		{name: "edit", shortcut: "alt+e", initial: prompt.Contents},
+		{name: "duplicate", shortcut: "alt+u", initial: prompt.Contents},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
+			model = update(t, model, key(test.shortcut))
+			model.focusForm(2)
+			destination := model.form.destination
+
+			model = update(t, model, tea.PasteMsg{Content: pasted})
+			model = update(t, model, key("x"))
+
+			if model.form == nil {
+				t.Fatal("pasted shortcut-looking text closed the form")
+			}
+			if model.confirmation != nil || model.form.destination != destination {
+				t.Fatalf("paste triggered a popup action: confirmation=%v destination=%q", model.confirmation != nil, model.form.destination)
+			}
+			if got, want := model.form.body.Value(), test.initial+pasted+"x"; got != want {
+				t.Errorf("body after paste and typing = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestFormTextInputsAcceptBracketedPaste(t *testing.T) {
+	model := NewWithLibraries(nil, fakeLibraries{})
+	model = update(t, model, key("alt+a"))
+	model = update(t, model, tea.PasteMsg{Content: "ctrl+s"})
+	model = update(t, model, key("x"))
+	if got, want := model.form.title.Value(), "ctrl+sx"; got != want {
+		t.Errorf("title after paste and typing = %q, want %q", got, want)
+	}
+
+	model = update(t, model, key("tab"))
+	model = update(t, model, tea.PasteMsg{Content: "esc"})
+	model = update(t, model, key("y"))
+	if model.form == nil {
+		t.Fatal("pasted shortcut-looking description closed the form")
+	}
+	if got, want := model.form.description.Value(), "escy"; got != want {
+		t.Errorf("description after paste and typing = %q, want %q", got, want)
+	}
+}
+
 func TestCrossScopeCreateRevealsResultAndPreservesMatchingQuery(t *testing.T) {
 	libraries := uiTestLibraries(t)
 	existing := mustCreatePrompt(t, libraries, config.SourceProject, "Existing", "body")

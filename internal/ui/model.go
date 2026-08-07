@@ -378,6 +378,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.refreshItems(model.currentPrompt(), true)
 			return model, nil
 		}
+	case tea.PasteMsg:
+		if model.form != nil {
+			return model.updateForm(message)
+		}
 	}
 
 	var commands []tea.Cmd
@@ -455,40 +459,42 @@ func (model *Model) focusForm(index int) tea.Cmd {
 	return nil
 }
 
-func (model Model) updateForm(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (model Model) updateForm(message tea.Msg) (tea.Model, tea.Cmd) {
 	form := model.form
-	switch message.String() {
-	case "esc":
-		model.form = nil
-		return model, nil
-	case "ctrl+s":
-		model.saveForm()
-		return model, nil
-	case "tab":
-		last := 3
-		if form.mode == editForm {
-			last = 2
-		}
-		return model, model.focusForm((form.focus + 1) % (last + 1))
-	case "shift+tab":
-		last := 3
-		if form.mode == editForm {
-			last = 2
-		}
-		next := form.focus - 1
-		if next < 0 {
-			next = last
-		}
-		return model, model.focusForm(next)
-	case "enter":
-		if form.focus < 2 {
-			return model, model.focusForm(form.focus + 1)
-		}
-	case "left", "right", " ":
-		if form.focus == 3 {
-			form.destination = otherSource(form.destination)
-			form.err = nil
+	if keyMessage, ok := message.(tea.KeyPressMsg); ok {
+		switch keyMessage.String() {
+		case "esc":
+			model.form = nil
 			return model, nil
+		case "ctrl+s":
+			model.saveForm()
+			return model, nil
+		case "tab":
+			last := 3
+			if form.mode == editForm {
+				last = 2
+			}
+			return model, model.focusForm((form.focus + 1) % (last + 1))
+		case "shift+tab":
+			last := 3
+			if form.mode == editForm {
+				last = 2
+			}
+			next := form.focus - 1
+			if next < 0 {
+				next = last
+			}
+			return model, model.focusForm(next)
+		case "enter":
+			if form.focus < 2 {
+				return model, model.focusForm(form.focus + 1)
+			}
+		case "left", "right", " ":
+			if form.focus == 3 {
+				form.destination = otherSource(form.destination)
+				form.err = nil
+				return model, nil
+			}
 		}
 	}
 
