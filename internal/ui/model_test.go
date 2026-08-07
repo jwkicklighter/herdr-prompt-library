@@ -2,15 +2,20 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"herdr-prompt-library/internal/config"
 )
+
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func TestNavigationChangesSelectionAndPreview(t *testing.T) {
 	model := newTestModel(t)
@@ -474,6 +479,76 @@ func TestFormTextInputsAcceptBracketedPaste(t *testing.T) {
 	}
 	if got, want := model.form.description.Value(), "escy"; got != want {
 		t.Errorf("description after paste and typing = %q, want %q", got, want)
+	}
+}
+
+func TestFormViewRendersLabeledBorderedFieldsWithSpacing(t *testing.T) {
+	model := NewWithLibraries(nil, fakeLibraries{})
+	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 24})
+	model = update(t, model, key("alt+a"))
+	view := ansiEscape.ReplaceAllString(model.View().Content, "")
+
+	for _, label := range []string{"Title", "Description", "Body"} {
+		if !strings.Contains(view, "╭─ "+label+" ") || !strings.Contains(view, "╰") {
+			t.Errorf("form view missing labeled %s border:\n%s", label, view)
+		}
+	}
+	fieldGap := regexp.MustCompile(`╯│\n│ *│\n│╭─ (Description|Body) `)
+	if matches := fieldGap.FindAllString(view, -1); len(matches) != 2 {
+		t.Errorf("form fields are not vertically separated:\n%s", view)
+	}
+}
+
+func TestFormViewHighlightsFocusedField(t *testing.T) {
+	model := NewWithLibraries(nil, fakeLibraries{})
+	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 24})
+	model = update(t, model, key("alt+a"))
+	if formField("Title", "", 20, true) == formField("Title", "", 20, false) {
+		t.Fatal("focused field border does not differ from its unfocused state")
+	}
+	view := model.View().Content
+	titleFocused := focusedFormFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Title ")
+	descriptionInactive := formFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Description ")
+	if !strings.Contains(view, titleFocused) || !strings.Contains(view, descriptionInactive) {
+		t.Fatal("initial focus styling was not rendered on title only")
+	}
+	view = ansiEscape.ReplaceAllString(view, "")
+	if !strings.Contains(view, "╭─ Title ") || !strings.Contains(view, "╭─ Description ") {
+		t.Fatal("form fields were not rendered")
+	}
+
+	model = update(t, model, key("tab"))
+	if model.form.focus != 1 {
+		t.Fatalf("focus after Tab = %d, want description", model.form.focus)
+	}
+	if formField("Description", "", 20, true) == formField("Description", "", 20, false) {
+		t.Fatal("description focus styling was not rendered after Tab")
+	}
+	descriptionFocused := focusedFormFieldBorderStyle.Render("╭─") + formFieldLabelStyle.Render(" Description ")
+	if view := model.View().Content; !strings.Contains(view, descriptionFocused) {
+		t.Fatal("description focus styling was not rendered in the view after Tab")
+	}
+}
+
+func TestFormViewFitsSupportedNarrowAndWideSizes(t *testing.T) {
+	for _, size := range []tea.WindowSizeMsg{{Width: 60, Height: 24}, {Width: 120, Height: 30}} {
+		t.Run(fmt.Sprintf("%dx%d", size.Width, size.Height), func(t *testing.T) {
+			model := NewWithLibraries(nil, fakeLibraries{})
+			model = update(t, model, size)
+			model = update(t, model, key("alt+a"))
+			view := ansiEscape.ReplaceAllString(model.View().Content, "")
+			for _, line := range strings.Split(view, "\n") {
+				if got := lipgloss.Width(line); got > size.Width {
+					t.Errorf("line width = %d, terminal width = %d: %q", got, size.Width, line)
+				}
+			}
+			if lines := len(strings.Split(view, "\n")); lines > size.Height {
+				t.Errorf("view height = %d, terminal height = %d", lines, size.Height)
+			}
+			if !strings.Contains(view, "< Local | Global >") {
+				t.Errorf("destination controls missing at %dx%d", size.Width, size.Height)
+			}
+		})
 	}
 }
 

@@ -403,8 +403,6 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	body := textarea.New()
 	body.Prompt = ""
 	body.Placeholder = "Required prompt body"
-	body.SetWidth(max(20, model.width-8))
-	body.SetHeight(max(5, model.height-14))
 
 	destination := model.defaultDestination()
 	if mode == editForm || mode == duplicateForm {
@@ -425,6 +423,7 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 		original:    prompt,
 	}
 	model.form = form
+	model.sizeForm()
 	model.operationErr = nil
 	model.focusForm(0)
 }
@@ -685,13 +684,22 @@ func (model Model) View() tea.View {
 	} else if !model.wide {
 		help = "type search | arrows move | tab scope | ^a/^l/^g | enter select | esc clear/close"
 	}
-	footer := helpStyle.Render(help)
+	footer := helpStyle.Render(lipgloss.Wrap(help, max(1, model.width), ""))
+	if model.form != nil {
+		// The form includes its own shortcut help; omitting the global footer
+		// leaves room for every field in short panes.
+		footer = ""
+	}
 	header := titleStyle.Render("Prompt Library") + "  " + model.scopeTabs()
 	search := helpStyle.Render("Search: ") + model.query
 	if model.query == "" {
 		search += helpStyle.Render("type to filter")
 	}
-	view := tea.NewView(header + "\n" + search + "\n" + body + "\n" + footer)
+	viewContents := header + "\n" + search + "\n" + body
+	if footer != "" {
+		viewContents += "\n" + footer
+	}
+	view := tea.NewView(viewContents)
 	view.AltScreen = true
 	return view
 }
@@ -701,8 +709,7 @@ func (model *Model) resize(width, height int) {
 	model.height = max(1, height)
 	model.wide = width >= wideLayoutMinimum
 	if model.form != nil {
-		model.form.body.SetWidth(max(20, model.width-8))
-		model.form.body.SetHeight(max(5, model.height-14))
+		model.sizeForm()
 	}
 
 	bodyHeight := max(minimumPanelSize, model.height-chromeHeight)
@@ -1040,16 +1047,8 @@ func (model Model) formPanel() string {
 	if form.destination == config.SourceGlobal {
 		destination = "Global"
 	}
-	lines := []string{
-		titleStyle.Render(heading),
-		"",
-		formLabel("Title", form.focus == 0),
-		form.title.View(),
-		formLabel("Description", form.focus == 1),
-		form.description.View(),
-		formLabel("Body", form.focus == 2),
-		form.body.View(),
-	}
+	fieldWidth := model.formWidth()
+	lines := []string{titleStyle.Render(heading), "", formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Description", form.description.View(), fieldWidth, form.focus == 1), "", formField("Body", form.body.View(), fieldWidth, form.focus == 2)}
 	if form.mode != editForm {
 		lines = append(lines, formLabel("Destination", form.focus == 3), "  < Local | Global >  "+destination)
 	}
@@ -1057,7 +1056,45 @@ func (model Model) formPanel() string {
 		lines = append(lines, "", errorStyle.Render("Could not save prompt: ")+form.err.Error())
 	}
 	lines = append(lines, "", helpStyle.Render("Tab/Shift+Tab fields | Enter newline in body | arrows/space destination | Ctrl+S save | Esc cancel"))
-	return panelStyle.Render(strings.Join(lines, "\n"))
+	return panelStyle.Width(fieldWidth + panelStyle.GetHorizontalFrameSize()).Render(strings.Join(lines, "\n"))
+}
+
+func (model *Model) sizeForm() {
+	if model.form == nil {
+		return
+	}
+	inputWidth := max(1, model.formWidth()-2)
+	model.form.title.SetWidth(inputWidth)
+	model.form.description.SetWidth(inputWidth)
+	model.form.body.SetWidth(inputWidth)
+	model.form.body.SetHeight(max(3, model.height-21))
+}
+
+func (model Model) formWidth() int {
+	width := model.width
+	if width == 0 {
+		width = 80
+	}
+	return max(3, width-panelStyle.GetHorizontalFrameSize())
+}
+
+func formField(label, contents string, width int, focused bool) string {
+	width = max(3, width)
+	border := formFieldBorderStyle
+	if focused {
+		border = focusedFormFieldBorderStyle
+	}
+	labelText := formFieldLabelStyle.Render(" " + label + " ")
+	topWidth := max(0, width-lipgloss.Width(labelText)-3)
+	top := border.Render("╭─") + labelText + border.Render(strings.Repeat("─", topWidth)+"╮")
+	innerWidth := width - 2
+	contents = lipgloss.NewStyle().Width(innerWidth).MaxWidth(innerWidth).Render(contents)
+	rows := strings.Split(contents, "\n")
+	for index, row := range rows {
+		rows[index] = border.Render("│") + row + border.Render("│")
+	}
+	bottom := border.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	return top + "\n" + strings.Join(rows, "\n") + "\n" + bottom
 }
 
 func formLabel(label string, focused bool) string {

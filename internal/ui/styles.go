@@ -12,6 +12,13 @@ var (
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(mutedColor)
+	formFieldBorderStyle = lipgloss.NewStyle().
+				Foreground(mutedColor)
+	focusedFormFieldBorderStyle = lipgloss.NewStyle().
+					Foreground(accentColor)
+	formFieldLabelStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(accentColor)
 	previewTitleStyle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(accentColor)
