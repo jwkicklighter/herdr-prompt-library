@@ -67,6 +67,30 @@ func TestLoadFilesPreservesBodyExactly(t *testing.T) {
 	}
 }
 
+func TestLoadFilesAllowsOptionalDescriptions(t *testing.T) {
+	for name, test := range map[string]struct {
+		frontmatter string
+		want        string
+	}{
+		"missing":         {"title: missing", ""},
+		"empty":           {"title: empty\ndescription:", ""},
+		"whitespace-only": {"title: whitespace\ndescription: ' \t '", " \t "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := t.TempDir()
+			writePromptFile(t, directory, "prompts/prompt.md", "---\n"+test.frontmatter+"\n---\nbody")
+
+			prompts, err := LoadFiles("", filepath.Join(directory, "prompts"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(prompts) != 1 || prompts[0].Description != test.want {
+				t.Errorf("prompts = %#v, want description %q", prompts, test.want)
+			}
+		})
+	}
+}
+
 func TestLoadFilesAllowsMissingDirectories(t *testing.T) {
 	directory := t.TempDir()
 	prompts, err := LoadFiles(filepath.Join(directory, "missing-global"), filepath.Join(directory, "missing-project"))
@@ -167,8 +191,7 @@ func TestValidateReportsBlankFieldsInDeterministicOrder(t *testing.T) {
 		want   string
 	}{
 		{Prompt{}, "title must not be blank"},
-		{Prompt{Name: "title"}, "description must not be blank"},
-		{Prompt{Name: "title", Description: "description"}, "contents must not be blank"},
+		{Prompt{Name: "title", Description: " \t"}, "contents must not be blank"},
 	} {
 		for range 20 {
 			if err := validate(test.prompt); err == nil || err.Error() != test.want {
@@ -183,10 +206,9 @@ func TestLoadFilesRejectsMalformedFrontmatterAndBlankFields(t *testing.T) {
 		contents string
 		want     string
 	}{
-		"invalid YAML":      {"---\ntitle: [\ndescription: broken\n---\nbody", "frontmatter"},
-		"blank title":       {promptFile(" \t", "description", "body"), "title must not be blank"},
-		"blank description": {promptFile("title", " \t", "body"), "description must not be blank"},
-		"blank body":        {promptFile("title", "description", " \t\n"), "contents must not be blank"},
+		"invalid YAML": {"---\ntitle: [\ndescription: broken\n---\nbody", "frontmatter"},
+		"blank title":  {promptFile(" \t", "description", "body"), "title must not be blank"},
+		"blank body":   {promptFile("title", "description", " \t\n"), "contents must not be blank"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			directory := t.TempDir()

@@ -399,7 +399,7 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	title.Placeholder = "Required title"
 	description := textinput.New()
 	description.Prompt = ""
-	description.Placeholder = "Required description"
+	description.Placeholder = "Optional description"
 	body := textarea.New()
 	body.Prompt = ""
 	body.Placeholder = "Required prompt body"

@@ -163,7 +163,6 @@ func validate(prompt Prompt) error {
 		value string
 	}{
 		{"title", prompt.Name},
-		{"description", prompt.Description},
 		{"contents", prompt.Contents},
 	} {
 		if strings.TrimSpace(field.value) == "" {

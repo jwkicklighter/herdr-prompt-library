@@ -67,7 +67,7 @@ Create the global directory when adding the first global prompt:
 mkdir -p "$(herdr plugin config-dir herdr.prompt-library)/prompts"
 ```
 
-Copy and adapt the individual examples in [`examples/prompts/`](examples/prompts/) into either directory. Each file has YAML frontmatter with required, nonblank `title` and `description` fields, followed by the literal prompt body:
+Copy and adapt the individual examples in [`examples/prompts/`](examples/prompts/) into either directory. Each file has YAML frontmatter with a required, nonblank `title` and an optional `description`, followed by a required, nonblank literal prompt body. The description may be omitted or blank:
 
 ```markdown
 ---
@@ -88,7 +88,7 @@ The picker has three source views:
 - `Local`: prompts below the focused project's `.herdr/prompts/`
 - `Global`: prompts below the plugin config `prompts/`
 
-The picker provides `All`, `Local`, and `Global` views; the default is `All`. Switching views never changes files. Each entry shows its title, description, and `LOCAL` or `GLOBAL` source badge. Duplicate titles remain separate entries.
+The picker provides `All`, `Local`, and `Global` views; the default is `All`. Switching views never changes files. Each entry shows its title, optional description, and `LOCAL` or `GLOBAL` source badge. Duplicate titles remain separate entries.
 
 Ordinary typing always enters the fuzzy search. Search matches the title, description, and body. Matching is case-insensitive; clearing the query restores the active view. Search never edits prompt contents. `Enter` immediately inserts the selected result; it does not open a separate selection step.
 
@@ -136,7 +136,7 @@ The popup resizes with Herdr. On wide terminals, the prompt list and preview are
 
 - **The keybinding does nothing:** confirm the plugin is linked and enabled with `herdr plugin list --plugin herdr.prompt-library`, then run `herdr server reload-config` after adding or changing the `[[keys.command]]` entry.
 - **No prompts appear:** verify the local or global `prompts/` directory contains recursive `.md` files. The global root is based on `herdr plugin config-dir herdr.prompt-library`.
-- **A file is skipped:** inspect the path-specific error for malformed frontmatter, a missing `title` or `description`, an unsupported field type, or a permissions problem.
+- **A file is skipped:** inspect the path-specific error for malformed frontmatter, a missing or blank `title` or body, an unsupported field type, or a permissions problem. Descriptions may be omitted or blank.
 - **Create or duplicate refuses to save:** ensure the destination directory is writable. Filenames are generated from the title and receive a collision suffix automatically.
 - **Move refuses to save:** ensure the opposite-scope directory is writable; move always targets the opposite scope.
 - **A changed prompt is not visible:** close and reopen the picker. Prompt files are loaded on open.

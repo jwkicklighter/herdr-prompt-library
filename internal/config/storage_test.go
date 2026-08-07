@@ -31,6 +31,36 @@ func TestLibrariesCreateBothScopesWithEscapedFrontmatterAndExactBody(t *testing.
 	}
 }
 
+func TestLibrariesRoundTripOptionalDescriptions(t *testing.T) {
+	libraries := testLibraries(t)
+	created, err := libraries.Create(SourceProject, Prompt{Name: "Optional", Contents: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadPrompt(created.Path, SourceProject)
+	if err != nil || loaded.Description != "" {
+		t.Fatalf("created description = %q, err = %v", loaded.Description, err)
+	}
+
+	updated, err := libraries.Update(created, Prompt{Name: "Optional", Description: " \t ", Contents: "updated body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = loadPrompt(updated.Path, SourceProject)
+	if err != nil || loaded.Description != " \t " {
+		t.Fatalf("updated description = %q, err = %v", loaded.Description, err)
+	}
+
+	duplicate, err := libraries.Duplicate(updated, SourceGlobal, Prompt{Name: "Optional copy", Contents: "updated body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = loadPrompt(duplicate.Path, SourceGlobal)
+	if err != nil || loaded.Description != "" {
+		t.Fatalf("duplicated description = %q, err = %v", loaded.Description, err)
+	}
+}
+
 func TestLibrariesCreateUsesDeterministicCollisionSuffixesWithoutOverwrite(t *testing.T) {
 	libraries := testLibraries(t)
 	first, err := libraries.Create(SourceProject, Prompt{Name: "Same Prompt", Description: "first", Contents: "first"})

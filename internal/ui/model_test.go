@@ -139,6 +139,20 @@ func TestWeightedFuzzySearchRanksFieldsAndShowsBodyExcerpt(t *testing.T) {
 	}
 }
 
+func TestDescriptionlessPromptRendersAndSearchesByTitleAndBody(t *testing.T) {
+	model := New([]config.Prompt{{Name: "Deploy helper", Contents: "production checklist", Source: config.SourceProject}})
+	model = update(t, model, tea.WindowSizeMsg{Width: 80, Height: 20})
+	if view := model.View().Content; !strings.Contains(view, "Deploy helper") {
+		t.Fatalf("descriptionless prompt missing from list: %q", view)
+	}
+	for _, input := range []string{"p", "r", "o", "d"} {
+		model = update(t, model, key(input))
+	}
+	if len(model.list.Items()) != 1 || !strings.Contains(model.list.Items()[0].(promptItem).description, "production checklist") {
+		t.Errorf("body search did not show a useful excerpt: %#v", model.list.Items())
+	}
+}
+
 func TestEscapeClearsQueryBeforeClosing(t *testing.T) {
 	model := newTestModel(t)
 	model = update(t, model, key("g"))
@@ -379,16 +393,18 @@ func TestCreatePromptsInBothScopesWithExactBody(t *testing.T) {
 			if model.form == nil || model.form.destination != source {
 				t.Fatalf("create destination = %#v, want %s", model.form, source)
 			}
+			if model.form.description.Placeholder != "Optional description" {
+				t.Errorf("description placeholder = %q", model.form.description.Placeholder)
+			}
 			body := "  first line\nsecond line  \n"
 			model.form.title.SetValue("New prompt")
-			model.form.description.SetValue("Description")
 			model.form.body.SetValue(body)
 			model = update(t, model, key("ctrl+s"))
 			if model.form != nil || len(model.prompts) != 1 {
 				t.Fatalf("save form=%v prompts=%#v", model.form != nil, model.prompts)
 			}
 			created := model.prompts[0]
-			if created.Source != source || created.Contents != body || model.preview.GetContent() != body {
+			if created.Source != source || created.Description != "" || created.Contents != body || model.preview.GetContent() != body {
 				t.Errorf("created = %#v, preview = %q", created, model.preview.GetContent())
 			}
 			contents, err := os.ReadFile(created.Path)
@@ -555,11 +571,11 @@ func TestEditPreservesPathUnknownMetadataAndRefreshesPreview(t *testing.T) {
 		t.Fatalf("edit form = %#v", model.form)
 	}
 	model.form.title.SetValue("Renamed")
-	model.form.description.SetValue("After")
+	model.form.description.SetValue("   ")
 	model.form.body.SetValue(" exact body\n")
 	model = update(t, model, key("ctrl+s"))
 	updated := model.currentPrompt()
-	if updated.Path != path || updated.Name != "Renamed" || model.preview.GetContent() != " exact body\n" {
+	if updated.Path != path || updated.Name != "Renamed" || updated.Description != "   " || model.preview.GetContent() != " exact body\n" {
 		t.Errorf("updated = %#v preview=%q", updated, model.preview.GetContent())
 	}
 	raw, err := os.ReadFile(path)
@@ -638,18 +654,19 @@ func TestDuplicatePreservesCustomFrontmatterAndRevealsCrossScopeResult(t *testin
 	model.refreshItems(original, true)
 	model = update(t, model, key("alt+u"))
 	model.form.title.SetValue("Fresh copy")
+	model.form.description.SetValue("")
 	model.form.destination = config.SourceGlobal
 	model = update(t, model, key("ctrl+s"))
 
 	duplicate := model.currentPrompt()
-	if model.scope != globalScope || model.query != "" || duplicate.Name != "Fresh copy" || duplicate.Source != config.SourceGlobal {
+	if model.scope != globalScope || model.query != "" || duplicate.Name != "Fresh copy" || duplicate.Description != "" || duplicate.Source != config.SourceGlobal {
 		t.Fatalf("cross-scope duplicate: scope=%s query=%q selected=%#v", model.scope, model.query, duplicate)
 	}
 	contents, err := os.ReadFile(duplicate.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(string(contents), "title: Fresh copy", "custom: keep-me", "old body\n") {
+	if !contains(string(contents), "title: Fresh copy", "description: \"\"", "custom: keep-me", "old body\n") {
 		t.Errorf("duplicate did not retain custom frontmatter: %q", contents)
 	}
 }
