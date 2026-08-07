@@ -458,7 +458,6 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	}
 	if mode == duplicateForm {
 		title.SetValue(prompt.Name + " copy")
-		title.CursorEnd()
 	}
 	form := &promptForm{
 		mode:        mode,
@@ -469,6 +468,7 @@ func (model *Model) openForm(mode formMode, prompt config.Prompt) {
 	}
 	model.form = form
 	model.sizeForm()
+	model.form.title.CursorEnd()
 	model.operationErr = nil
 	model.focusForm(0)
 }
@@ -1208,7 +1208,9 @@ func (model *Model) sizeForm() {
 		return
 	}
 	inputWidth := max(1, model.formFieldWidth()-2)
-	model.form.title.SetWidth(inputWidth)
+	titlePosition := model.form.title.Position()
+	model.form.title.SetWidth(max(1, inputWidth-1))
+	model.form.title.SetCursor(titlePosition)
 	model.form.body.SetWidth(inputWidth)
 	model.form.body.SetHeight(max(3, model.height-17))
 }

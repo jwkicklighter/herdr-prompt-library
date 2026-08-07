@@ -895,6 +895,34 @@ func TestDuplicateTitleCursorStartsAfterCopySuffix(t *testing.T) {
 	}
 }
 
+func TestLongDuplicateTitleKeepsSuffixAndCursorVisibleAcrossResize(t *testing.T) {
+	title := strings.Repeat("Long title ", 12)
+	prompt := config.Prompt{Name: title, Contents: "body", Source: config.SourceProject, Path: "/project/long.md"}
+	model := NewWithLibraries([]config.Prompt{prompt}, fakeLibraries{})
+	model = update(t, model, tea.WindowSizeMsg{Width: 60, Height: 24})
+	model = update(t, model, tea.KeyPressMsg{Code: 'd', Text: "d"})
+	want := title + " copy"
+
+	assertDuplicateTitleEndVisible(t, model, want)
+	model = update(t, model, tea.WindowSizeMsg{Width: wideLayoutMinimum, Height: 24})
+	assertDuplicateTitleEndVisible(t, model, want)
+}
+
+func assertDuplicateTitleEndVisible(t *testing.T, model Model, want string) {
+	t.Helper()
+	if model.form.title.Value() != want || model.form.title.Position() != len([]rune(want)) {
+		t.Fatalf("duplicate title=%q cursor=%d, want logical cursor at %d", model.form.title.Value(), model.form.title.Position(), len([]rune(want)))
+	}
+	visibleTitle := ansiEscape.ReplaceAllString(model.form.title.View(), "")
+	if !strings.HasSuffix(visibleTitle, "copy ") {
+		t.Fatalf("focused title end is not visible: %q", visibleTitle)
+	}
+	rendered := ansiEscape.ReplaceAllString(model.View().Content, "")
+	if !strings.Contains(rendered, "copy ") {
+		t.Fatalf("rendered editor clips duplicate suffix or cursor:\n%s", rendered)
+	}
+}
+
 func TestEditorReportsOfficialPlaceholderAvailabilityResponsively(t *testing.T) {
 	wide := NewWithLibraries(nil, fakeLibraries{})
 	wide = update(t, wide, tea.WindowSizeMsg{Width: 120, Height: 30})
