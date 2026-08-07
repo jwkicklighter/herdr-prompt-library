@@ -20,7 +20,7 @@ func TestPickerModelInsertsExactPromptIntoCapturedPane(t *testing.T) {
 	var gotArgs []string
 	model, err := pickerModel(env(herdr.TargetPaneIDEnv, "pane-at-open"), func() ([]config.Prompt, error) {
 		return []config.Prompt{{Name: "exact", Description: "exact bytes", Contents: contents}}, nil
-	}, herdr.Client{Binary: "/tmp/herdr", Run: func(name string, args []string, _ []string) error {
+	}, testConfiguredLibraries, herdr.Client{Binary: "/tmp/herdr", Run: func(name string, args []string, _ []string) error {
 		gotName, gotArgs = name, args
 		return nil
 	}})
@@ -59,7 +59,7 @@ func TestPickerModelUsesDefaultBinaryAndStaysOpenOnInsertionFailure(t *testing.T
 	var gotName string
 	model, err := pickerModel(env(herdr.TargetPaneIDEnv, "captured-pane"), func() ([]config.Prompt, error) {
 		return []config.Prompt{{Name: "prompt", Description: "desc", Contents: "contents"}}, nil
-	}, herdr.Client{Run: func(name string, _ []string, _ []string) error {
+	}, testConfiguredLibraries, herdr.Client{Run: func(name string, _ []string, _ []string) error {
 		gotName = name
 		return want
 	}})
@@ -93,13 +93,45 @@ func TestPickerModelUsesDefaultBinaryAndStaysOpenOnInsertionFailure(t *testing.T
 }
 
 func TestPickerModelRejectsMissingCapturedPane(t *testing.T) {
-	_, err := pickerModel(env(), func() ([]config.Prompt, error) { return nil, nil }, herdr.Client{})
+	_, err := pickerModel(env(), func() ([]config.Prompt, error) { return nil, nil }, testConfiguredLibraries, herdr.Client{})
 	if err == nil || err.Error() != "open prompt picker: missing HERDR_PROMPT_LIBRARY_TARGET_PANE_ID" {
 		t.Errorf("pickerModel() error = %v, want missing-pane error", err)
 	}
 }
 
+func TestPickerModelInjectsConfiguredLibrariesAndReportsConfigurationFailure(t *testing.T) {
+	configuredErr := errors.New("cannot determine cwd")
+	loadCalled := false
+	_, err := pickerModel(env(herdr.TargetPaneIDEnv, "pane"), func() ([]config.Prompt, error) {
+		loadCalled = true
+		return nil, nil
+	}, func() (config.Libraries, error) {
+		return config.Libraries{}, configuredErr
+	}, herdr.Client{})
+	if !errors.Is(err, configuredErr) || !strings.Contains(err.Error(), "configure prompt libraries") {
+		t.Fatalf("pickerModel() error = %v", err)
+	}
+	if loadCalled {
+		t.Error("prompt load ran after library configuration failed")
+	}
+
+	model, err := pickerModel(env(herdr.TargetPaneIDEnv, "pane"), func() ([]config.Prompt, error) {
+		return nil, nil
+	}, testConfiguredLibraries, herdr.Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := model.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModAlt})
+	if command != nil || !strings.Contains(updated.(ui.Model).View().Content, "Create prompt") {
+		t.Error("configured libraries did not enable popup management")
+	}
+}
+
 func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
+
+func testConfiguredLibraries() (config.Libraries, error) {
+	return config.Libraries{LocalDir: "/tmp/local", GlobalDir: "/tmp/global"}, nil
+}
 
 func containsAll(value string, parts ...string) bool {
 	for _, part := range parts {

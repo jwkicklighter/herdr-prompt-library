@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -10,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -39,6 +42,46 @@ type InsertionResultMsg struct {
 type promptItem struct {
 	prompt      config.Prompt
 	description string
+}
+
+// LibraryMutator is the storage used by prompt management actions.
+type LibraryMutator interface {
+	Create(string, config.Prompt) (config.Prompt, error)
+	Update(config.Prompt, config.Prompt) (config.Prompt, error)
+	Delete(config.Prompt) error
+	Move(config.Prompt, string) (config.Prompt, error)
+}
+
+type formMode int
+
+const (
+	createForm formMode = iota + 1
+	editForm
+	duplicateForm
+)
+
+type promptForm struct {
+	mode        formMode
+	title       textinput.Model
+	description textinput.Model
+	body        textarea.Model
+	destination string
+	focus       int
+	original    config.Prompt
+	err         error
+}
+
+type confirmationKind int
+
+const (
+	deleteConfirmation confirmationKind = iota + 1
+	moveConfirmation
+)
+
+type confirmation struct {
+	kind   confirmationKind
+	prompt config.Prompt
+	err    error
 }
 
 func (item promptItem) FilterValue() string {
@@ -114,21 +157,35 @@ type Model struct {
 	cancelled      bool
 	insert         func(config.Prompt) error
 	insertErr      error
+	libraries      LibraryMutator
+	form           *promptForm
+	confirmation   *confirmation
+	operationErr   error
 }
 
 // New creates a picker from loaded configuration prompts. A load error is
 // rendered as an actionable configuration state instead of replacing the TUI.
 func New(prompts []config.Prompt, loadErrors ...error) Model {
-	return newModel(prompts, nil, loadErrors...)
+	return newModel(prompts, nil, nil, loadErrors...)
 }
 
 // NewWithInsertion creates a picker that inserts prompts before it quits.
 // Errors are retained in the picker so the user can correct and retry.
 func NewWithInsertion(prompts []config.Prompt, insert func(config.Prompt) error, loadErrors ...error) Model {
-	return newModel(prompts, insert, loadErrors...)
+	return newModel(prompts, insert, nil, loadErrors...)
 }
 
-func newModel(prompts []config.Prompt, insert func(config.Prompt) error, loadErrors ...error) Model {
+// NewWithLibraries creates a picker with in-popup prompt management enabled.
+func NewWithLibraries(prompts []config.Prompt, libraries LibraryMutator, loadErrors ...error) Model {
+	return newModel(prompts, nil, libraries, loadErrors...)
+}
+
+// NewWithInsertionAndLibraries enables prompt insertion and management.
+func NewWithInsertionAndLibraries(prompts []config.Prompt, insert func(config.Prompt) error, libraries LibraryMutator, loadErrors ...error) Model {
+	return newModel(prompts, insert, libraries, loadErrors...)
+}
+
+func newModel(prompts []config.Prompt, insert func(config.Prompt) error, libraries LibraryMutator, loadErrors ...error) Model {
 	var loadErr error
 	if len(loadErrors) > 0 {
 		loadErr = loadErrors[0]
@@ -154,6 +211,7 @@ func newModel(prompts []config.Prompt, insert func(config.Prompt) error, loadErr
 		scopeSelection: make(map[libraryScope]config.Prompt),
 		configErr:      loadErr,
 		insert:         insert,
+		libraries:      libraries,
 	}
 	model.refreshItems(config.Prompt{}, false)
 	return model
@@ -196,6 +254,18 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.selected = &prompt
 		return model, tea.Quit
 	case tea.KeyPressMsg:
+		if model.form != nil {
+			return model.updateForm(message)
+		}
+		if model.confirmation != nil {
+			return model.updateConfirmation(message)
+		}
+		if model.operationErr != nil {
+			if message.String() == "esc" {
+				model.operationErr = nil
+			}
+			return model, nil
+		}
 		switch message.String() {
 		case "esc":
 			if model.query != "" {
@@ -228,11 +298,51 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return model, nil
 		case "enter":
-			if item, ok := model.list.SelectedItem().(promptItem); ok && model.configErr == nil {
+			if item, ok := model.list.SelectedItem().(promptItem); ok && (model.configErr == nil || len(model.prompts) > 0) {
 				prompt := item.prompt
 				return model, func() tea.Msg { return SelectionMsg{Prompt: prompt} }
 			}
 			return model, nil
+		case "alt+a":
+			if model.libraries != nil {
+				model.openForm(createForm, config.Prompt{})
+				return model, nil
+			}
+			break
+		case "alt+e":
+			if model.libraries != nil {
+				if prompt := model.currentPrompt(); prompt.Path != "" {
+					model.openForm(editForm, prompt)
+				}
+				return model, nil
+			}
+			break
+		case "alt+d":
+			if model.libraries != nil {
+				if prompt := model.currentPrompt(); prompt.Path != "" {
+					model.confirmation = &confirmation{kind: deleteConfirmation, prompt: prompt}
+					model.operationErr = nil
+				}
+				return model, nil
+			}
+			break
+		case "alt+u":
+			if model.libraries != nil {
+				if prompt := model.currentPrompt(); prompt.Path != "" {
+					model.openForm(duplicateForm, prompt)
+				}
+				return model, nil
+			}
+			break
+		case "alt+m":
+			if model.libraries != nil {
+				if prompt := model.currentPrompt(); prompt.Path != "" {
+					model.confirmation = &confirmation{kind: moveConfirmation, prompt: prompt}
+					model.operationErr = nil
+				}
+				return model, nil
+			}
+			break
 		case "up":
 			before := model.list.Index()
 			model.list.CursorUp()
@@ -278,11 +388,252 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return model, tea.Batch(commands...)
 }
 
+func (model *Model) openForm(mode formMode, prompt config.Prompt) {
+	title := textinput.New()
+	title.Prompt = ""
+	title.Placeholder = "Required title"
+	description := textinput.New()
+	description.Prompt = ""
+	description.Placeholder = "Required description"
+	body := textarea.New()
+	body.Prompt = ""
+	body.Placeholder = "Required prompt body"
+	body.SetWidth(max(20, model.width-8))
+	body.SetHeight(max(5, model.height-14))
+
+	destination := model.defaultDestination()
+	if mode == editForm || mode == duplicateForm {
+		title.SetValue(prompt.Name)
+		description.SetValue(prompt.Description)
+		body.SetValue(prompt.Contents)
+		destination = prompt.Source
+	}
+	if mode == duplicateForm {
+		title.SetValue(prompt.Name + " copy")
+	}
+	form := &promptForm{
+		mode:        mode,
+		title:       title,
+		description: description,
+		body:        body,
+		destination: destination,
+		original:    prompt,
+	}
+	model.form = form
+	model.operationErr = nil
+	model.focusForm(0)
+}
+
+func (model Model) defaultDestination() string {
+	switch model.scope {
+	case globalScope:
+		return config.SourceGlobal
+	case localScope:
+		return config.SourceProject
+	}
+	if prompt := model.currentPrompt(); prompt.Source != "" {
+		return prompt.Source
+	}
+	return config.SourceProject
+}
+
+func (model *Model) focusForm(index int) tea.Cmd {
+	form := model.form
+	form.title.Blur()
+	form.description.Blur()
+	form.body.Blur()
+	form.focus = index
+	switch index {
+	case 0:
+		return form.title.Focus()
+	case 1:
+		return form.description.Focus()
+	case 2:
+		return form.body.Focus()
+	}
+	return nil
+}
+
+func (model Model) updateForm(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	form := model.form
+	switch message.String() {
+	case "esc":
+		model.form = nil
+		return model, nil
+	case "ctrl+s":
+		model.saveForm()
+		return model, nil
+	case "tab":
+		last := 3
+		if form.mode == editForm {
+			last = 2
+		}
+		return model, model.focusForm((form.focus + 1) % (last + 1))
+	case "shift+tab":
+		last := 3
+		if form.mode == editForm {
+			last = 2
+		}
+		next := form.focus - 1
+		if next < 0 {
+			next = last
+		}
+		return model, model.focusForm(next)
+	case "enter":
+		if form.focus < 2 {
+			return model, model.focusForm(form.focus + 1)
+		}
+	case "left", "right", " ":
+		if form.focus == 3 {
+			form.destination = otherSource(form.destination)
+			form.err = nil
+			return model, nil
+		}
+	}
+
+	var command tea.Cmd
+	switch form.focus {
+	case 0:
+		form.title, command = form.title.Update(message)
+	case 1:
+		form.description, command = form.description.Update(message)
+	case 2:
+		form.body, command = form.body.Update(message)
+	}
+	return model, command
+}
+
+func (model *Model) saveForm() {
+	form := model.form
+	changes := config.Prompt{
+		Name:        form.title.Value(),
+		Description: form.description.Value(),
+		Contents:    form.body.Value(),
+	}
+	var (
+		saved config.Prompt
+		err   error
+	)
+	if form.mode == editForm {
+		saved, err = model.libraries.Update(form.original, changes)
+	} else {
+		saved, err = model.libraries.Create(form.destination, changes)
+	}
+	if err != nil {
+		form.err = err
+		return
+	}
+	if form.mode == editForm {
+		model.replacePrompt(form.original, saved)
+	} else {
+		model.prompts = append(model.prompts, saved)
+	}
+	model.form = nil
+	model.refreshItems(saved, true)
+}
+
+func (model Model) updateConfirmation(message tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	confirmation := model.confirmation
+	switch message.String() {
+	case "esc", "n":
+		model.confirmation = nil
+		return model, nil
+	case "enter", "y":
+		if confirmation.kind == deleteConfirmation {
+			model.confirmDelete()
+		} else {
+			model.confirmMove()
+		}
+	}
+	return model, nil
+}
+
+func (model *Model) confirmDelete() {
+	prompt := model.confirmation.prompt
+	target := model.neighborPrompt(prompt)
+	if err := model.libraries.Delete(prompt); err != nil {
+		model.confirmation.err = err
+		return
+	}
+	model.removePrompt(prompt)
+	model.confirmation = nil
+	model.refreshItems(target, true)
+}
+
+func (model *Model) confirmMove() {
+	prompt := model.confirmation.prompt
+	destination := otherSource(prompt.Source)
+	moved, err := model.libraries.Move(prompt, destination)
+	if err != nil {
+		var partial *config.PartialMoveError
+		if errors.As(err, &partial) {
+			if moved.Path != "" {
+				model.prompts = append(model.prompts, moved)
+			}
+			model.confirmation = nil
+			model.operationErr = fmt.Errorf("partial move: both files remain; source %q; destination %q: %w", partial.SourcePath, partial.DestinationPath, partial.Err)
+			model.refreshItems(prompt, true)
+			return
+		}
+		model.confirmation.err = err
+		return
+	}
+	model.replacePrompt(prompt, moved)
+	model.confirmation = nil
+	model.refreshItems(moved, true)
+}
+
+func (model *Model) replacePrompt(old, replacement config.Prompt) {
+	for index := range model.prompts {
+		if samePrompt(model.prompts[index], old) {
+			model.prompts[index] = replacement
+			return
+		}
+	}
+}
+
+func (model *Model) removePrompt(prompt config.Prompt) {
+	for index := range model.prompts {
+		if samePrompt(model.prompts[index], prompt) {
+			model.prompts = append(model.prompts[:index], model.prompts[index+1:]...)
+			return
+		}
+	}
+}
+
+func (model Model) neighborPrompt(prompt config.Prompt) config.Prompt {
+	items := model.list.Items()
+	for index, raw := range items {
+		item := raw.(promptItem)
+		if !samePrompt(item.prompt, prompt) {
+			continue
+		}
+		if index+1 < len(items) {
+			return items[index+1].(promptItem).prompt
+		}
+		if index > 0 {
+			return items[index-1].(promptItem).prompt
+		}
+	}
+	return config.Prompt{}
+}
+
+func otherSource(source string) string {
+	if source == config.SourceGlobal {
+		return config.SourceProject
+	}
+	return config.SourceGlobal
+}
+
 func (model Model) View() tea.View {
 	var body string
 	switch {
-	case model.configErr != nil:
-		body = model.statePanel(errorStyle.Render("Could not load prompts") + "\n\n" + model.configErr.Error() + "\n\nFix .herdr/prompts.toml or $HERDR_PLUGIN_CONFIG_DIR/prompts.toml, then reopen the picker.")
+	case model.form != nil:
+		body = model.formPanel()
+	case model.confirmation != nil:
+		body = model.confirmationPanel()
+	case model.configErr != nil && len(model.prompts) == 0:
+		body = model.statePanel(errorStyle.Render("Could not load prompts") + "\n\n" + model.configErr.Error() + "\n\nFix the malformed Markdown prompt, then reopen the picker.")
 	case len(model.list.Items()) == 0:
 		body = model.statePanel(model.emptyState())
 	default:
@@ -294,12 +645,20 @@ func (model Model) View() tea.View {
 			body = lipgloss.JoinVertical(lipgloss.Left, listPanel, previewPanel)
 		}
 	}
+	if model.configErr != nil && len(model.prompts) > 0 && model.form == nil && model.confirmation == nil {
+		body = errorStyle.Render("Some prompts could not be loaded: ") + model.configErr.Error() + "\n" + body
+	}
+	if model.operationErr != nil {
+		body = model.statePanel(errorStyle.Render("Prompt operation needs attention") + "\n\n" + model.operationErr.Error() + "\n\nPress Esc to acknowledge and return to the library.")
+	}
 	if model.insertErr != nil {
 		body = model.statePanel(errorStyle.Render("Could not insert prompt")+"\n\n"+model.insertErr.Error()+"\n\nCheck that Herdr is running and the target pane still exists, then press Enter to retry.") + "\n" + body
 	}
 
 	help := "type search | up/down navigate | tab scope | ctrl+a/ctrl+l/ctrl+g | enter select | esc clear/close"
-	if !model.wide {
+	if model.libraries != nil {
+		help = "type search | alt+a add | alt+e edit | alt+d delete | alt+u duplicate | alt+m move | enter insert"
+	} else if !model.wide {
 		help = "type search | arrows move | tab scope | ^a/^l/^g | enter select | esc clear/close"
 	}
 	footer := helpStyle.Render(help)
@@ -317,6 +676,10 @@ func (model *Model) resize(width, height int) {
 	model.width = max(1, width)
 	model.height = max(1, height)
 	model.wide = width >= wideLayoutMinimum
+	if model.form != nil {
+		model.form.body.SetWidth(max(20, model.width-8))
+		model.form.body.SetHeight(max(5, model.height-14))
+	}
 
 	bodyHeight := max(minimumPanelSize, model.height-chromeHeight)
 	if model.wide {
@@ -445,6 +808,9 @@ func (model *Model) rememberSelection() {
 }
 
 func samePrompt(left, right config.Prompt) bool {
+	if left.Path != "" || right.Path != "" {
+		return left.Path != "" && left.Path == right.Path
+	}
 	return left.Name == right.Name && left.Description == right.Description &&
 		left.Contents == right.Contents && left.Source == right.Source
 }
@@ -549,4 +915,67 @@ func (model Model) statePanel(contents string) string {
 	width := max(1, model.width-panelStyle.GetHorizontalFrameSize())
 	height := max(1, model.height-chromeHeight-panelStyle.GetVerticalFrameSize())
 	return panelStyle.Width(width).Height(height).Render(lipgloss.Wrap(contents, width, ""))
+}
+
+func (model Model) formPanel() string {
+	form := model.form
+	heading := "Create prompt"
+	switch form.mode {
+	case editForm:
+		heading = "Edit prompt"
+	case duplicateForm:
+		heading = "Duplicate prompt"
+	}
+	destination := "Local"
+	if form.destination == config.SourceGlobal {
+		destination = "Global"
+	}
+	lines := []string{
+		titleStyle.Render(heading),
+		"",
+		formLabel("Title", form.focus == 0),
+		form.title.View(),
+		formLabel("Description", form.focus == 1),
+		form.description.View(),
+		formLabel("Body", form.focus == 2),
+		form.body.View(),
+	}
+	if form.mode != editForm {
+		lines = append(lines, formLabel("Destination", form.focus == 3), "  < Local | Global >  "+destination)
+	}
+	if form.err != nil {
+		lines = append(lines, "", errorStyle.Render("Could not save prompt: ")+form.err.Error())
+	}
+	lines = append(lines, "", helpStyle.Render("Tab/Shift+Tab fields | Enter newline in body | arrows/space destination | Ctrl+S save | Esc cancel"))
+	return panelStyle.Render(strings.Join(lines, "\n"))
+}
+
+func formLabel(label string, focused bool) string {
+	if focused {
+		return selectedItemNameStyle.Render("> " + label)
+	}
+	return itemNameStyle.Render("  " + label)
+}
+
+func (model Model) confirmationPanel() string {
+	confirmation := model.confirmation
+	prompt := confirmation.prompt
+	scope := "Local"
+	if prompt.Source == config.SourceGlobal {
+		scope = "Global"
+	}
+	heading := "Delete prompt?"
+	detail := fmt.Sprintf("Title: %s\nScope: %s\nPath: %s", prompt.Name, scope, prompt.Path)
+	if confirmation.kind == moveConfirmation {
+		destination := "Global"
+		if prompt.Source == config.SourceGlobal {
+			destination = "Local"
+		}
+		heading = "Move prompt?"
+		detail += "\nDestination: " + destination
+	}
+	if confirmation.err != nil {
+		detail += "\n\n" + errorStyle.Render("Operation failed: ") + confirmation.err.Error()
+	}
+	return model.statePanel(titleStyle.Render(heading) + "\n\n" + detail + "\n\nEnter/y confirm | Esc/n cancel")
 }

@@ -26,14 +26,14 @@ func command(args []string) error {
 			Binary: os.Getenv("HERDR_BIN_PATH"),
 		})
 	case "picker":
-		return picker(os.Getenv, config.Load, herdr.Client{Binary: os.Getenv("HERDR_BIN_PATH")})
+		return picker(os.Getenv, config.Load, config.ConfiguredLibraries, herdr.Client{Binary: os.Getenv("HERDR_BIN_PATH")})
 	default:
 		return fmt.Errorf("unknown command %q: %w", args[0], errUsage)
 	}
 }
 
-func picker(getenv func(string) string, load func() ([]config.Prompt, error), client herdr.Client) error {
-	model, err := pickerModel(getenv, load, client)
+func picker(getenv func(string) string, load func() ([]config.Prompt, error), configuredLibraries func() (config.Libraries, error), client herdr.Client) error {
+	model, err := pickerModel(getenv, load, configuredLibraries, client)
 	if err != nil {
 		return err
 	}
@@ -43,15 +43,19 @@ func picker(getenv func(string) string, load func() ([]config.Prompt, error), cl
 	return nil
 }
 
-func pickerModel(getenv func(string) string, load func() ([]config.Prompt, error), client herdr.Client) (ui.Model, error) {
+func pickerModel(getenv func(string) string, load func() ([]config.Prompt, error), configuredLibraries func() (config.Libraries, error), client herdr.Client) (ui.Model, error) {
 	targetPaneID := getenv(herdr.TargetPaneIDEnv)
 	if targetPaneID == "" {
 		return ui.Model{}, errors.New("open prompt picker: missing HERDR_PROMPT_LIBRARY_TARGET_PANE_ID")
 	}
+	libraries, err := configuredLibraries()
+	if err != nil {
+		return ui.Model{}, fmt.Errorf("configure prompt libraries: %w", err)
+	}
 	prompts, loadErr := load()
-	return ui.NewWithInsertion(prompts, func(prompt config.Prompt) error {
+	return ui.NewWithInsertionAndLibraries(prompts, func(prompt config.Prompt) error {
 		return client.SendText(targetPaneID, prompt.Contents)
-	}, loadErr), nil
+	}, libraries, loadErr), nil
 }
 
 type pluginContext struct {
