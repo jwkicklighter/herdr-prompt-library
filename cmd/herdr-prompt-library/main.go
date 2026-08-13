@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"herdr-prompt-library/internal/config"
 	"herdr-prompt-library/internal/herdr"
+	"herdr-prompt-library/internal/placeholders"
 	"herdr-prompt-library/internal/ui"
 )
 
@@ -53,8 +55,16 @@ func pickerModel(getenv func(string) string, load func() ([]config.Prompt, error
 		return ui.Model{}, fmt.Errorf("configure prompt libraries: %w", err)
 	}
 	prompts, loadErr := load()
+	expander := placeholders.Expander{
+		Values: placeholders.Values{
+			HerdrTabID:             getenv(herdr.TabIDEnv),
+			HerdrPluginContextJSON: getenv(herdr.PluginContextEnv),
+			Directory:              getenv(herdr.DirectoryEnv),
+		},
+		Now: time.Now,
+	}
 	return ui.NewWithInsertionAndLibraries(prompts, func(prompt config.Prompt) error {
-		return client.SendText(targetPaneID, prompt.Contents)
+		return client.SendText(targetPaneID, expander.Expand(prompt.Contents))
 	}, libraries, loadErr), nil
 }
 

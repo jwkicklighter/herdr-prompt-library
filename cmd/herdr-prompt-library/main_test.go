@@ -77,6 +77,35 @@ func TestPickerLeavesUnsupportedTokenLookingTextLiteral(t *testing.T) {
 	}
 }
 
+func TestPickerExpandsPropagatedContextImmediatelyBeforeSendText(t *testing.T) {
+	contents := "tab={{ herdr_tab_id }} context={{herdr_plugin_context_json}} directory={{\tdirectory\n}}"
+	contextJSON := `{"focused_pane_id":"pane-1","quoted":"'$HOME"}`
+	var gotArgs []string
+	model, err := pickerModel(env(
+		herdr.TargetPaneIDEnv, "pane-at-open",
+		herdr.TabIDEnv, "tab-9",
+		herdr.PluginContextEnv, contextJSON,
+		herdr.DirectoryEnv, "/project with spaces",
+	), func() ([]config.Prompt, error) {
+		return []config.Prompt{{Name: "expanded", Contents: contents}}, nil
+	}, testConfiguredLibraries, herdr.Client{Run: func(_ string, args []string, _ []string) error {
+		gotArgs = args
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, command := model.Update(keyEnter())
+	_, command = updated.(ui.Model).Update(command())
+	if result := command().(ui.InsertionResultMsg); result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	want := `tab=tab-9 context={"focused_pane_id":"pane-1","quoted":"'$HOME"} directory=/project with spaces`
+	if got := gotArgs[len(gotArgs)-1]; got != want {
+		t.Fatalf("sent contents = %q, want %q", got, want)
+	}
+}
+
 func TestPickerModelUsesDefaultBinaryAndStaysOpenOnInsertionFailure(t *testing.T) {
 	want := errors.New("target pane disappeared")
 	var gotName string
