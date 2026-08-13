@@ -68,7 +68,7 @@ type pluginContext struct {
 }
 
 func open(getenv func(string) string, client herdr.Client) error {
-	contextJSON := getenv("HERDR_PLUGIN_CONTEXT_JSON")
+	contextJSON := getenv(herdr.PluginContextEnv)
 	if contextJSON == "" {
 		return errors.New("open prompt library: missing HERDR_PLUGIN_CONTEXT_JSON")
 	}
@@ -92,7 +92,7 @@ func open(getenv func(string) string, client herdr.Client) error {
 		return errors.New("open prompt library: no project root in plugin context")
 	}
 
-	return client.OpenPicker(context.FocusedPaneID, projectRoot)
+	return client.OpenPicker(context.FocusedPaneID, projectRoot, getenv(herdr.TabIDEnv), contextJSON, context.FocusedPaneCWD)
 }
 
 func main() {

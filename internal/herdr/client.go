@@ -11,8 +11,11 @@ import (
 const (
 	PluginID         = "herdr.prompt-library"
 	PickerEntrypoint = "picker"
+	TabIDEnv         = "HERDR_TAB_ID"
+	PluginContextEnv = "HERDR_PLUGIN_CONTEXT_JSON"
 	TargetPaneIDEnv  = "HERDR_PROMPT_LIBRARY_TARGET_PANE_ID"
 	ProjectRootEnv   = "HERDR_PROMPT_LIBRARY_PROJECT_ROOT"
+	DirectoryEnv     = "HERDR_PROMPT_LIBRARY_DIRECTORY"
 	DefaultBinary    = "herdr"
 )
 
@@ -44,9 +47,9 @@ func (c Client) SendText(targetPaneID, text string) error {
 	return nil
 }
 
-// OpenPicker opens the manifest-defined picker against targetPaneID. The
-// target and root are also placed in the picker environment for later actions.
-func (c Client) OpenPicker(targetPaneID, projectRoot string) error {
+// OpenPicker opens the manifest-defined picker against targetPaneID. Context
+// captured by the action is placed in the picker environment for later use.
+func (c Client) OpenPicker(targetPaneID, projectRoot, tabID, pluginContextJSON, directory string) error {
 	binary := c.Binary
 	if binary == "" {
 		binary = DefaultBinary
@@ -62,6 +65,9 @@ func (c Client) OpenPicker(targetPaneID, projectRoot string) error {
 		"--entrypoint", PickerEntrypoint,
 		"--env", TargetPaneIDEnv + "=" + targetPaneID,
 		"--env", ProjectRootEnv + "=" + projectRoot,
+		"--env", TabIDEnv + "=" + tabID,
+		"--env", PluginContextEnv + "=" + pluginContextJSON,
+		"--env", DirectoryEnv + "=" + directory,
 	}
 	if err := run(binary, args, nil); err != nil {
 		return fmt.Errorf("open prompt picker: %w", err)

@@ -183,35 +183,40 @@ func TestOpenRejectsMissingFocusedPane(t *testing.T) {
 
 func TestOpenRootFallbacksAndArgumentPropagation(t *testing.T) {
 	tests := []struct {
-		name   string
-		json   string
-		target string
-		root   string
+		name      string
+		json      string
+		target    string
+		root      string
+		directory string
 	}{
 		{
-			name:   "worktree checkout path",
-			json:   `{"focused_pane_id":"pane; $(nope)","focused_pane_cwd":"/pane","workspace_cwd":"/workspace","worktree":{"checkout_path":"/checkout with spaces; $HOME"}}`,
-			target: "pane; $(nope)",
-			root:   "/checkout with spaces; $HOME",
+			name:      "worktree checkout path",
+			json:      `{"focused_pane_id":"pane; $(nope)","focused_pane_cwd":"/pane","workspace_cwd":"/workspace","worktree":{"checkout_path":"/checkout with spaces; $HOME"}}`,
+			target:    "pane; $(nope)",
+			root:      "/checkout with spaces; $HOME",
+			directory: "/pane",
 		},
 		{
-			name:   "workspace cwd",
-			json:   `{"focused_pane_id":"pane-1","focused_pane_cwd":"/pane","workspace_cwd":"/workspace"}`,
-			target: "pane-1",
-			root:   "/workspace",
+			name:      "workspace cwd",
+			json:      `{"focused_pane_id":"pane-1","focused_pane_cwd":"/pane","workspace_cwd":"/workspace"}`,
+			target:    "pane-1",
+			root:      "/workspace",
+			directory: "/pane",
 		},
 		{
-			name:   "focused pane cwd",
-			json:   `{"focused_pane_id":"pane-1","focused_pane_cwd":"/pane"}`,
-			target: "pane-1",
-			root:   "/pane",
+			name:      "focused pane cwd",
+			json:      `{"focused_pane_id":"pane-1","focused_pane_cwd":"/pane"}`,
+			target:    "pane-1",
+			root:      "/pane",
+			directory: "/pane",
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			var gotArgs []string
-			err := open(env("HERDR_PLUGIN_CONTEXT_JSON", test.json), herdr.Client{
+			tabID := "tab 'quoted'; $(nope) 世界"
+			err := open(env(herdr.PluginContextEnv, test.json, herdr.TabIDEnv, tabID), herdr.Client{
 				Binary: "herdr test binary",
 				Run: func(_ string, args []string, _ []string) error {
 					gotArgs = args
@@ -225,11 +230,34 @@ func TestOpenRootFallbacksAndArgumentPropagation(t *testing.T) {
 				"plugin", "pane", "open", "--plugin", herdr.PluginID, "--entrypoint", herdr.PickerEntrypoint,
 				"--env", herdr.TargetPaneIDEnv + "=" + test.target,
 				"--env", herdr.ProjectRootEnv + "=" + test.root,
+				"--env", herdr.TabIDEnv + "=" + tabID,
+				"--env", herdr.PluginContextEnv + "=" + test.json,
+				"--env", herdr.DirectoryEnv + "=" + test.directory,
 			}
 			if !reflect.DeepEqual(gotArgs, wantArgs) {
 				t.Errorf("arguments = %#v, want %#v", gotArgs, wantArgs)
 			}
 		})
+	}
+}
+
+func TestOpenPropagatesEmptyOptionalContextValues(t *testing.T) {
+	contextJSON := `{"focused_pane_id":"pane-1","workspace_cwd":"/project"}`
+	var gotArgs []string
+	err := open(env(herdr.PluginContextEnv, contextJSON), herdr.Client{Run: func(_ string, args []string, _ []string) error {
+		gotArgs = args
+		return nil
+	}})
+	if err != nil {
+		t.Fatalf("open() error = %v", err)
+	}
+	wantSuffix := []string{
+		"--env", herdr.TabIDEnv + "=",
+		"--env", herdr.PluginContextEnv + "=" + contextJSON,
+		"--env", herdr.DirectoryEnv + "=",
+	}
+	if !reflect.DeepEqual(gotArgs[len(gotArgs)-len(wantSuffix):], wantSuffix) {
+		t.Errorf("argument suffix = %#v, want %#v", gotArgs[len(gotArgs)-len(wantSuffix):], wantSuffix)
 	}
 }
 
