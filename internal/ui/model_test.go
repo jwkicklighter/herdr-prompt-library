@@ -865,7 +865,7 @@ func TestEditorHeadingAndPlaceholderAlignment(t *testing.T) {
 					if sidebarLine != titleLine {
 						t.Errorf("placeholder border=%d, title border=%d\n%s", sidebarLine, titleLine, view)
 					}
-				} else if sidebarLine >= 0 || !strings.Contains(view, "No Herdr placeholders") {
+				} else if sidebarLine >= 0 || !strings.Contains(view, "Placeholders:") {
 					t.Errorf("narrow placeholder state changed:\n%s", view)
 				}
 			})
@@ -959,21 +959,41 @@ func assertDuplicateTitleEndVisible(t *testing.T, model Model, want string) {
 	}
 }
 
-func TestEditorReportsOfficialPlaceholderAvailabilityResponsively(t *testing.T) {
-	wide := NewWithLibraries(nil, fakeLibraries{})
-	wide = update(t, wide, tea.WindowSizeMsg{Width: 120, Height: 30})
-	wide = update(t, wide, key("a"))
-	wideView := ansiEscape.ReplaceAllString(wide.View().Content, "")
-	if !contains(wideView, "╭─ Herdr placeholders ", "None exposed by Herdr 0.8.0.") {
-		t.Fatalf("wide editor does not show the placeholder sidebar:\n%s", wideView)
-	}
-
-	narrow := NewWithLibraries(nil, fakeLibraries{})
-	narrow = update(t, narrow, tea.WindowSizeMsg{Width: 60, Height: 24})
-	narrow = update(t, narrow, key("a"))
-	narrowView := ansiEscape.ReplaceAllString(narrow.View().Content, "")
-	if !strings.Contains(narrowView, "No Herdr placeholders") || strings.Contains(narrowView, "╭─ Herdr placeholders ") {
-		t.Fatalf("narrow editor did not collapse the placeholder sidebar:\n%s", narrowView)
+func TestEditorExposesPlaceholdersResponsivelyInEveryMode(t *testing.T) {
+	tokens := []string{"{{herdr_tab_id}}", "{{herdr_plugin_context_json}}", "{{today}}", "{{now}}", "{{directory}}"}
+	for _, layout := range []struct {
+		name string
+		size tea.WindowSizeMsg
+		wide bool
+	}{
+		{name: "narrow", size: tea.WindowSizeMsg{Width: 60, Height: 24}},
+		{name: "wide", size: tea.WindowSizeMsg{Width: 120, Height: 30}, wide: true},
+	} {
+		for _, mode := range []formMode{createForm, editForm, duplicateForm} {
+			t.Run(fmt.Sprintf("%s/%d", layout.name, mode), func(t *testing.T) {
+				model := NewWithLibraries(nil, fakeLibraries{})
+				model = update(t, model, layout.size)
+				model.openForm(mode, config.Prompt{Name: "Existing", Contents: "body", Source: config.SourceProject, Path: "/existing.md"})
+				view := ansiEscape.ReplaceAllString(model.View().Content, "")
+				for _, token := range tokens {
+					if !strings.Contains(view, token) {
+						t.Errorf("editor does not expose %q:\n%s", token, view)
+					}
+				}
+				if layout.wide {
+					if !contains(view, "╭─ Herdr placeholders ", "Target tab ID", "Herdr context JSON", "Current date", "Current time", "Working directory") {
+						t.Errorf("wide editor placeholder meanings missing:\n%s", view)
+					}
+				} else if !strings.Contains(view, "Placeholders:") || strings.Contains(view, "╭─ Herdr placeholders ") {
+					t.Errorf("narrow editor did not render its compact placeholder hint:\n%s", view)
+				}
+				for _, line := range strings.Split(view, "\n") {
+					if got := lipgloss.Width(line); got > layout.size.Width {
+						t.Errorf("line width = %d, terminal width = %d: %q", got, layout.size.Width, line)
+					}
+				}
+			})
+		}
 	}
 }
 

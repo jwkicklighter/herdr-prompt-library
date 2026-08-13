@@ -1197,14 +1197,14 @@ func (model Model) formPanel() string {
 		lines = append(lines, "", errorStyle.Render("Could not save prompt: ")+form.err.Error())
 	}
 	if !model.wide {
-		lines = append(lines, helpStyle.Render("No Herdr placeholders | Tab fields | ^S save | Esc"))
+		lines = append(lines, helpStyle.Render(lipgloss.Wrap("Placeholders: {{herdr_tab_id}}, {{herdr_plugin_context_json}}, {{today}}, {{now}}, {{directory}} | Tab fields | ^S save | Esc", fieldWidth, "")))
 	} else {
-		lines = append(lines, "", helpStyle.Render(lipgloss.Wrap("Tab/Shift+Tab fields | Enter newline in prompt | arrows/space destination | Ctrl+S save | Esc cancel", fieldWidth, "")))
+		lines = append(lines, "", helpStyle.Render(lipgloss.Wrap("Tab fields | Ctrl+S save | Esc cancel", fieldWidth, "")))
 	}
 	contents := strings.Join(lines, "\n")
 	if model.wide {
-		sidebarOuterWidth := max(18, model.formWidth()-fieldWidth-panelGap)
-		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("None exposed by Herdr 0.8.0."), panelContentWidth(sidebarOuterWidth))
+		sidebarOuterWidth := model.formWidth() - fieldWidth - panelGap
+		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("{{herdr_tab_id}}\nTarget tab ID\n{{herdr_plugin_context_json}}\nHerdr context JSON\n{{today}}\nCurrent date\n{{now}}\nCurrent time\n{{directory}}\nWorking directory"), panelContentWidth(sidebarOuterWidth))
 		contents = lipgloss.JoinHorizontal(lipgloss.Top, contents, strings.Repeat(" ", panelGap), sidebar)
 	}
 	headingLine := lipgloss.PlaceHorizontal(model.formWidth(), lipgloss.Center, editorHeadingStyle.Render(heading))
@@ -1234,7 +1234,8 @@ func (model Model) formWidth() int {
 func (model Model) formFieldWidth() int {
 	width := model.formWidth()
 	if model.wide {
-		return max(3, (width-panelGap)*2/3)
+		// Keep the long context token intact in the sidebar at the wide threshold.
+		return max(3, width-35-panelGap)
 	}
 	return width
 }
