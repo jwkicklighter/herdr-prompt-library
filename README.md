@@ -81,9 +81,25 @@ The closing frontmatter delimiter must be on its own line. Everything after it i
 
 ## Herdr context and placeholders
 
-Herdr 0.8.0 passes action context to plugins through `HERDR_PLUGIN_CONTEXT_JSON`. Prompt Library reads only the focused pane ID and project-root fields needed to open the picker; it does not forward the raw context into the picker. The current Herdr plugin contract does not define a placeholder syntax or any official placeholder names, so Prompt Library does not invent its own variables. Text that looks like a template token is saved and inserted literally, byte for byte.
+Prompt bodies support these five lowercase placeholders when they are inserted:
 
-The editor shows this limitation in its placeholder area. On wide panes it appears as a right sidebar; on narrow panes it collapses to a compact status line. Placeholder navigation and insertion will only be enabled when Herdr publishes an official token contract.
+| Placeholder | Value |
+| --- | --- |
+| `herdr_tab_id` | The Herdr tab ID captured when the picker was activated. |
+| `herdr_plugin_context_json` | The raw `HERDR_PLUGIN_CONTEXT_JSON` value captured when the picker was activated. It is inserted as JSON text without parsing or reformatting. |
+| `today` | The local insertion-time date in `YYYY-MM-DD` format. |
+| `now` | The local insertion-time datetime in RFC 3339 format, including the local timezone offset (for example, `2026-08-13T09:15:00-04:00`). |
+| `directory` | The focused pane's current working directory, captured when the picker was activated. This is the pane CWD, not a project-root fallback. |
+
+Names are matched case-sensitively, and any amount of ASCII whitespace is allowed inside the braces. Both compact and spaced syntax work:
+
+```text
+Date: {{today}}
+Directory: {{ directory }}
+Context: {{      herdr_plugin_context_json      }}
+```
+
+Expansion happens only immediately before insertion. Prompt files are not rewritten, so saved tokens remain in the file exactly as written. Unknown names, differently cased names, malformed braces, and other token-like text remain literal and are inserted unchanged.
 
 ## Views and search
 
