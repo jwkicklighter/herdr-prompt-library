@@ -890,6 +890,9 @@ func TestDestinationControlKeyboardAndEditFormFields(t *testing.T) {
 	if model.form.destination != config.SourceGlobal {
 		t.Fatalf("right did not select global: %q", model.form.destination)
 	}
+	if view := model.formPanel(); !strings.Contains(view, destinationControl(config.SourceGlobal, true)) {
+		t.Errorf("global destination is not rendered as selected: %q", ansiEscape.ReplaceAllString(view, ""))
+	}
 	model = update(t, model, tea.KeyPressMsg{Code: tea.KeyRight})
 	if model.form.destination != config.SourceGlobal {
 		t.Fatalf("repeated right changed global destination: %q", model.form.destination)
@@ -983,6 +986,22 @@ func TestEditorExposesPlaceholdersResponsivelyInEveryMode(t *testing.T) {
 				if layout.wide {
 					if !contains(view, "╭─ Herdr placeholders ", "Target tab ID", "Herdr context JSON", "Current date", "Current time", "Working directory") {
 						t.Errorf("wide editor placeholder meanings missing:\n%s", view)
+					}
+					viewLines := strings.Split(view, "\n")
+					entries := [][2]string{
+						{"Target tab ID", "{{herdr_tab_id}}"},
+						{"Herdr context JSON", "{{herdr_plugin_context_json}}"},
+						{"Current date", "{{today}}"},
+						{"Current time", "{{now}}"},
+						{"Working directory", "{{directory}}"},
+					}
+					previousTokenLine := -1
+					for _, entry := range entries {
+						labelLine, tokenLine := lineContaining(viewLines, entry[0]), lineContaining(viewLines, entry[1])
+						if tokenLine != labelLine+1 || (previousTokenLine >= 0 && labelLine != previousTokenLine+2) {
+							t.Errorf("wide editor placeholder %q lines = label %d, token %d, previous token %d:\n%s", entry[1], labelLine, tokenLine, previousTokenLine, view)
+						}
+						previousTokenLine = tokenLine
 					}
 				} else if !strings.Contains(view, "Placeholders:") || strings.Contains(view, "╭─ Herdr placeholders ") {
 					t.Errorf("narrow editor did not render its compact placeholder hint:\n%s", view)
@@ -1636,4 +1655,13 @@ func contains(value string, parts ...string) bool {
 		}
 	}
 	return true
+}
+
+func lineContaining(lines []string, part string) int {
+	for index, line := range lines {
+		if strings.Contains(line, part) {
+			return index
+		}
+	}
+	return -1
 }

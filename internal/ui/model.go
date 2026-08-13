@@ -1146,6 +1146,14 @@ func footerGroups(groups []footerGroup) string {
 }
 
 func titledPanel(title, contents string, innerWidth int) string {
+	return renderTitledPanel(title, contents, innerWidth, true)
+}
+
+func titledPanelCompact(title, contents string, innerWidth int) string {
+	return renderTitledPanel(title, contents, innerWidth, false)
+}
+
+func renderTitledPanel(title, contents string, innerWidth int, topPadding bool) string {
 	innerWidth = max(1, innerWidth)
 	panelInnerWidth := innerWidth + panelInnerPadding*2
 	label := " " + title + " "
@@ -1153,9 +1161,12 @@ func titledPanel(title, contents string, innerWidth int) string {
 	topFill := max(0, panelInnerWidth-ansi.StringWidth(label)-1)
 	top := formFieldBorderStyle.Render("╭─") + previewTitleStyle.Render(label) + formFieldBorderStyle.Render(strings.Repeat("─", topFill)+"╮")
 
-	rows := append([]string{strings.Repeat(" ", panelInnerWidth)}, strings.Split(contents, "\n")...)
+	rows := strings.Split(contents, "\n")
+	if topPadding {
+		rows = append([]string{strings.Repeat(" ", panelInnerWidth)}, rows...)
+	}
 	for index, row := range rows {
-		if index > 0 {
+		if !topPadding || index > 0 {
 			row = strings.Repeat(" ", panelInnerPadding) + ansi.Cut(row, 0, innerWidth)
 		}
 		row += strings.Repeat(" ", max(0, panelInnerWidth-ansi.StringWidth(row)))
@@ -1184,14 +1195,10 @@ func (model Model) formPanel() string {
 	case duplicateForm:
 		heading = "Duplicate Prompt"
 	}
-	destination := "Local"
-	if form.destination == config.SourceGlobal {
-		destination = "Global"
-	}
 	fieldWidth := model.formFieldWidth()
 	lines := []string{formField("Title", form.title.View(), fieldWidth, form.focus == 0), "", formField("Prompt", form.body.View(), fieldWidth, form.focus == 1)}
 	if form.mode != editForm {
-		lines = append(lines, destinationControl(destination, form.focus == 2))
+		lines = append(lines, destinationControl(form.destination, form.focus == 2))
 	}
 	if form.err != nil {
 		lines = append(lines, "", errorStyle.Render("Could not save prompt: ")+form.err.Error())
@@ -1204,10 +1211,17 @@ func (model Model) formPanel() string {
 	contents := strings.Join(lines, "\n")
 	if model.wide {
 		sidebarOuterWidth := model.formWidth() - fieldWidth - panelGap
-		sidebar := titledPanel("Herdr placeholders", helpStyle.Render("{{herdr_tab_id}}\nTarget tab ID\n{{herdr_plugin_context_json}}\nHerdr context JSON\n{{today}}\nCurrent date\n{{now}}\nCurrent time\n{{directory}}\nWorking directory"), panelContentWidth(sidebarOuterWidth))
+		sidebarContents := helpStyle.Render("Target tab ID\n{{herdr_tab_id}}\n\nHerdr context JSON\n{{herdr_plugin_context_json}}\n\nCurrent date\n{{today}}\n\nCurrent time\n{{now}}\n\nWorking directory\n{{directory}}")
+		sidebar := titledPanel("Herdr placeholders", sidebarContents, panelContentWidth(sidebarOuterWidth))
+		if model.height <= 24 {
+			sidebar = titledPanelCompact("Herdr placeholders", sidebarContents, panelContentWidth(sidebarOuterWidth))
+		}
 		contents = lipgloss.JoinHorizontal(lipgloss.Top, contents, strings.Repeat(" ", panelGap), sidebar)
 	}
 	headingLine := lipgloss.PlaceHorizontal(model.formWidth(), lipgloss.Center, editorHeadingStyle.Render(heading))
+	if model.wide && model.height <= 24 {
+		return panelStyle.Render("\n" + headingLine + "\n" + contents)
+	}
 	return panelStyle.Render("\n" + headingLine + "\n\n" + contents)
 }
 
@@ -1220,7 +1234,11 @@ func (model *Model) sizeForm() {
 	model.form.title.SetWidth(max(1, inputWidth-1))
 	model.form.title.SetCursor(titlePosition)
 	model.form.body.SetWidth(inputWidth)
-	model.form.body.SetHeight(max(3, model.height-17))
+	bodyHeightOffset := 17
+	if model.wide {
+		bodyHeightOffset = 19
+	}
+	model.form.body.SetHeight(max(3, model.height-bodyHeightOffset))
 }
 
 func (model Model) formWidth() int {
@@ -1259,11 +1277,11 @@ func formField(label, contents string, width int, focused bool) string {
 	return top + "\n" + strings.Join(rows, "\n") + "\n" + bottom
 }
 
-func destinationControl(destination string, focused bool) string {
+func destinationControl(source string, focused bool) string {
 	selected := lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(accentColor).Padding(0, 1)
 	unselected := lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 1)
 	local, global := unselected.Render("Local"), unselected.Render("Global")
-	if destination == config.SourceGlobal {
+	if source == config.SourceGlobal {
 		global = selected.Render("Global")
 	} else {
 		local = selected.Render("Local")
