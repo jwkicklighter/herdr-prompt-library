@@ -1130,7 +1130,7 @@ func TestDeleteCancellationFilteredNearestAndLastResult(t *testing.T) {
 	model.query = "Keep"
 	model.refreshItems(second, true)
 	model = update(t, model, key("alt+d"))
-	if view := model.View().Content; !contains(view, "Delete prompt?", "Keep second", "Local", filepath.Base(second.Path)) || model.confirmation.prompt.Path != second.Path {
+	if view := model.View().Content; !contains(view, "Delete prompt?", "Keep second", "Local", "Path:") || model.confirmation.prompt.Path != second.Path {
 		t.Fatalf("confirmation missing context: %s", view)
 	}
 	model = update(t, model, key("esc"))
@@ -1502,7 +1502,7 @@ func TestMoveBothDirectionsAndPartialFailure(t *testing.T) {
 			if source == config.SourceGlobal {
 				wantDestination = "Local"
 			}
-			if view := model.View().Content; !contains(view, "Move prompt?", "Destination: "+wantDestination, filepath.Base(prompt.Path)) || model.confirmation.prompt.Path != prompt.Path {
+			if view := model.View().Content; !contains(view, "Move prompt?", "Destination: "+wantDestination, "Path:") || model.confirmation.prompt.Path != prompt.Path {
 				t.Errorf("move confirmation missing context: %s", view)
 			}
 			model = update(t, model, key("enter"))
