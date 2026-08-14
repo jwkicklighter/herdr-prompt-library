@@ -14,6 +14,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          invalid=0
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?(!)?:[[:space:]].+'
+
+          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+            echo "Invalid Conventional Commit PR title: $PR_TITLE"
+            invalid=1
+          fi
+
+          while IFS= read -r subject; do
+            if [[ ! "$subject" =~ $pattern ]]; then
+              echo "Invalid Conventional Commit subject: $subject"
+              invalid=1
+            fi
+          done < <(git log --format=%s "$BASE_SHA..$HEAD_SHA")
+          exit "$invalid"
 
       - name: Set up Go
         uses: actions/setup-go@v7

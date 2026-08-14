@@ -23,6 +23,10 @@ bd close <id>         # Complete work
 bd dolt push          # Push beads data to remote
 ```
 
+## Contributions
+
+Follow [`CONTRIBUTING.md`](CONTRIBUTING.md). Use Conventional Commits for commit messages and pull request titles, and disclose any AI assistance in the pull request.
+
 ## Non-Interactive Shell Commands
 
 **ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
