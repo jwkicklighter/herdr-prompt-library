@@ -4,7 +4,7 @@ name: Release
 # draft release, then this workflow builds its assets and publishes it.
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 jobs:
   release:
