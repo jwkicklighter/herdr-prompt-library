@@ -2,6 +2,8 @@
 
 Prompt Library is a [Herdr](https://herdr.dev) plugin for browsing, managing, and inserting prompts into the pane that was focused when the picker opened. Prompts are Markdown files. Insertion is literal: frontmatter is metadata and only the Markdown body is sent; shell syntax is not executed and the prompt is not submitted.
 
+![Herdr Prompt Library picker](screenshot.png)
+
 ## Requirements
 
 - Herdr 0.7.5 or later
