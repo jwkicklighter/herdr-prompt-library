@@ -1,6 +1,6 @@
 # Herdr Prompt Library
 
-Prompt Library is a local [Herdr](https://herdr.dev) plugin for browsing, managing, and inserting prompts into the pane that was focused when the picker opened. Prompts are Markdown files. Insertion is literal: frontmatter is metadata and only the Markdown body is sent; shell syntax is not executed and the prompt is not submitted.
+Prompt Library is a [Herdr](https://herdr.dev) plugin for browsing, managing, and inserting prompts into the pane that was focused when the picker opened. Prompts are Markdown files. Insertion is literal: frontmatter is metadata and only the Markdown body is sent; shell syntax is not executed and the prompt is not submitted.
 
 ## Requirements
 
@@ -67,7 +67,7 @@ Prompt Library combines two optional prompt directories:
 - Global prompts: `$(herdr plugin config-dir herdr.prompt-library)/prompts/`
 - Local prompts: `.herdr/prompts/` in the project root of the focused pane
 
-Both directories are optional. Prompt Library discovers Markdown files recursively below each root, so subdirectories can organize a library. Only files ending in `.md` are prompt files. Local prompts are shown before global prompts and retain their `LOCAL` or `GLOBAL` source label.
+Both directories are optional. Prompt Library discovers Markdown files recursively below each root, so subdirectories can organize a library. Files ending in `.md`, matched case-insensitively, are prompt files. Local prompts are shown before global prompts and retain their `LOCAL` or `GLOBAL` source label.
 
 Create the global directory when adding the first global prompt:
 
