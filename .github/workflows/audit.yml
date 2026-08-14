@@ -1,0 +1,22 @@
+name: Audit
+
+# Check dependency changes immediately and the unchanged tree weekly for new advisories.
+on:
+  push:
+    paths: ["go.mod", "go.sum", ".github/workflows/audit.yml"]
+  pull_request:
+    paths: ["go.mod", "go.sum", ".github/workflows/audit.yml"]
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...

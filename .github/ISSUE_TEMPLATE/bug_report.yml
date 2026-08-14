@@ -1,0 +1,60 @@
+name: Bug report
+description: Report a reproducible bug in Prompt Library.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A screenshot or recording of the picker is especially helpful for UI problems.
+
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior
+      description: What happens now?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Start from a fresh Herdr pane and include the prompt scope, files, and keys used.
+      placeholder: |
+        1. Open Prompt Library in a project with ...
+        2. Press ...
+        3. See ...
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Prompt Library version
+      description: From `herdr plugin list --plugin herdr.prompt-library`, or the release you installed.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, terminal emulator, and Herdr version (`herdr --version`).
+      placeholder: macOS 15, Ghostty, Herdr 0.9.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include relevant prompt frontmatter, directory layout, logs, or other unusual setup details.

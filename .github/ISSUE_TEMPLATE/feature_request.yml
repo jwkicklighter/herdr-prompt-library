@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement to Prompt Library.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where does Prompt Library get in the way or fall short?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: Describe how it could work. The workflow matters more than exact keys or UI details.
+    validations:
+      required: true

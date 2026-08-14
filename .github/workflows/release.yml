@@ -1,0 +1,75 @@
+name: Release
+
+# Build precompiled plugin archives whenever a version tag is pushed.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create draft release
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
+              --title "Prompt Library $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  binaries:
+    needs: create-release
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          archive="herdr-prompt-library-${GOOS}-${GOARCH}.tar.gz"
+          mkdir -p dist/bin
+          go build -trimpath -ldflags="-s -w" -o dist/bin/herdr-prompt-library ./cmd/herdr-prompt-library
+          tar -czf "$archive" -C dist bin/herdr-prompt-library -C "$GITHUB_WORKSPACE" herdr-plugin.toml
+          sha256sum "$archive" > "$archive.sha256"
+
+      - name: Upload release assets
+        run: gh release upload "$GITHUB_REF_NAME" herdr-prompt-library-* --clobber --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attest archive
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: herdr-prompt-library-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+
+  publish:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
