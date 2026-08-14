@@ -7,7 +7,15 @@ Prompt Library is a local [Herdr](https://herdr.dev) plugin for browsing, managi
 - Herdr 0.7.5 or later
 - Go 1.25 or later, available as `go`
 
-## Build and link
+## Installation
+
+Install the plugin directly from this Git repository with Herdr:
+
+```sh
+herdr plugin install jwkicklighter/herdr-prompt-library
+```
+
+## Build and link locally
 
 From this repository, build the plugin:
 
@@ -169,3 +177,7 @@ Picker accents use ANSI cyan and muted text uses ANSI gray. Herdr forwards its a
 - **A changed prompt is not visible:** close and reopen the picker. Prompt files are loaded on open.
 - **Insertion fails:** ensure Herdr is still running and that the pane that opened the picker still exists. The picker remains open so you can retry after fixing the problem.
 - **A different prompt was inserted:** duplicate titles are separate entries. Use the source badge, prompt excerpt, and preview to select the intended entry.
+
+## AI disclosure
+
+This project was developed with assistance from AI coding tools. AI-assisted changes are reviewed and tested by the maintainer before inclusion.
