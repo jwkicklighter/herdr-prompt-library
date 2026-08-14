@@ -1,31 +1,44 @@
 name: Release
 
-# Build precompiled plugin archives whenever a version tag is pushed.
+# Maintain a release PR from Conventional Commits. Merging that PR creates a
+# draft release, then this workflow builds its assets and publishes it.
 on:
   push:
-    tags: ["v*"]
-
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+    branches: [main]
 
 jobs:
-  create-release:
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - name: Create draft release
-        run: |
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --draft --generate-notes \
-              --title "Prompt Library $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Enable auto-merge for the release PR
+        if: steps.release.outputs.prs_created == 'true'
+        run: gh pr merge --auto --squash "$(jq -r .number <<<"$RELEASE_PR")"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
 
   binaries:
-    needs: create-release
+    needs: release
+    if: needs.release.outputs.release_created == 'true'
     name: ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +49,8 @@ jobs:
           - { goos: linux, goarch: amd64 }
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release.outputs.tag_name }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -56,9 +71,10 @@ jobs:
           sha256sum "$archive" > "$archive.sha256"
 
       - name: Upload release assets
-        run: gh release upload "$GITHUB_REF_NAME" herdr-prompt-library-* --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$RELEASE_TAG" herdr-prompt-library-* --clobber --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag_name }}
 
       - name: Attest archive
         uses: actions/attest-build-provenance@v4
@@ -66,10 +82,14 @@ jobs:
           subject-path: herdr-prompt-library-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
 
   publish:
-    needs: binaries
+    if: needs.release.outputs.release_created == 'true'
+    needs: [release, binaries]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Publish release
-        run: gh release edit "$GITHUB_REF_NAME" --draft=false --repo "$GITHUB_REPOSITORY"
+        run: gh release edit "$RELEASE_TAG" --draft=false --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag_name }}

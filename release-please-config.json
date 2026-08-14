@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "simple",
+  "include-component-in-tag": false,
+  "draft": true,
+  "force-tag-creation": true,
+  "packages": {
+    ".": {
+      "package-name": "herdr-prompt-library",
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "herdr-plugin.toml",
+          "jsonpath": "$.version"
+        }
+      ]
+    }
+  }
+}
