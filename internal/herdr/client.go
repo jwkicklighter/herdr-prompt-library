@@ -16,6 +16,8 @@ const (
 	TargetPaneIDEnv  = "HERDR_PROMPT_LIBRARY_TARGET_PANE_ID"
 	ProjectRootEnv   = "HERDR_PROMPT_LIBRARY_PROJECT_ROOT"
 	DirectoryEnv     = "HERDR_PROMPT_LIBRARY_DIRECTORY"
+	AgentPrompt      = "agent prompt"
+	SendText         = "pane send-text"
 	DefaultBinary    = "herdr"
 )
 
@@ -25,13 +27,14 @@ type Runner func(name string, args []string, env []string) error
 
 // Client invokes the Herdr CLI for plugin pane operations.
 type Client struct {
-	Binary string
-	Run    Runner
+	Binary        string
+	InsertCommand string
+	Run           Runner
 }
 
-// SendText inserts text into targetPaneID without submitting it. The text is
-// passed as one argv element, preserving whitespace and shell metacharacters.
-func (c Client) SendText(targetPaneID, text string) error {
+// InsertPrompt sends text to targetPaneID using the configured Herdr command.
+// The text is passed as one argv element, preserving whitespace and shell metacharacters.
+func (c Client) InsertPrompt(targetPaneID, text string) error {
 	binary := c.Binary
 	if binary == "" {
 		binary = DefaultBinary
@@ -41,7 +44,21 @@ func (c Client) SendText(targetPaneID, text string) error {
 		run = runCommand
 	}
 
-	if err := run(binary, []string{"pane", "send-text", targetPaneID, text}, nil); err != nil {
+	command := c.InsertCommand
+	if command == "" {
+		command = SendText
+	}
+	var args []string
+	switch command {
+	case AgentPrompt:
+		args = []string{"agent", "prompt", targetPaneID, text}
+	case SendText:
+		args = []string{"pane", "send-text", targetPaneID, text}
+	default:
+		return fmt.Errorf("insert prompt into pane %q: unsupported command %q (choose %q or %q)", targetPaneID, command, AgentPrompt, SendText)
+	}
+
+	if err := run(binary, args, nil); err != nil {
 		return fmt.Errorf("insert prompt into pane %q: %w", targetPaneID, err)
 	}
 	return nil
